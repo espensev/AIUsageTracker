@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Grok CLI provider** — new `grok` provider surfaces the xAI Grok CLI (SuperGrok) weekly credit usage alongside the existing cards. Session auth is discovered from the Grok CLI's own store (`~/.grok/auth.json`, issuer-scoped root key with a wildcard schema), and usage is read from `https://cli-chat-proxy.grok.com/v1/billing?format=credits`: a rolling Weekly card from `creditUsagePercent` with the billing-period reset time and per-product usage in the description, plus an On-Demand card when the account has an on-demand credit cap. The provider re-reads the auth file before each refresh because the CLI rotates its OIDC access token every few hours; a missing session renders as "Grok CLI session missing - run grok login".
+- **Wildcard root properties in `ProviderAuthFileSchema`** — a schema `RootProperty` ending in `*` (e.g. `https://auth.x.ai::*`) now matches any root property by prefix, enabling issuer-scoped auth stores whose property names embed a dynamic segment (the OIDC client id). Such property names contain dots and are matched whole instead of being dot-navigated.
+
 ## [2.4.6-beta.2] - 2026-07-27
 
 ### Added
