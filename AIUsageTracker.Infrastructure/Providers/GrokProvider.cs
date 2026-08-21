@@ -142,10 +142,10 @@ public class GrokProvider : ProviderBase
 
         if (data.Config == null)
         {
-            return new[] { this.CreateUnavailableUsage("No billing data available", authSource: config.AuthSource) };
+            return new[] { this.CreateUnavailableUsage("No billing data available", authSource: effectiveConfig.AuthSource) };
         }
 
-        return this.BuildUsageCards(data.Config, fetchResult.RawContent, fetchResult.HttpStatus, config.AuthSource, providerLabel);
+        return this.BuildUsageCards(data.Config, fetchResult.RawContent, fetchResult.HttpStatus, effectiveConfig.AuthSource, providerLabel);
     }
 
     private IEnumerable<ProviderUsage> BuildUsageCards(
