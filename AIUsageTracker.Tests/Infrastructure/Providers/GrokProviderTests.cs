@@ -28,6 +28,48 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
     }
 
     [Fact]
+    public async Task GetUsageAsync_MissingSession_ReturnsMissingStatusAsync()
+    {
+        // Arrange
+        var config = new ProviderConfig
+        {
+            ProviderId = "grok",
+            AuthSource = "Grok CLI auth session",
+        };
+        var authFilePath = Path.Combine(Path.GetTempPath(), $"missing-grok-auth-{Guid.NewGuid():N}.json");
+        var provider = new GrokProvider(this.HttpClient, this.Logger.Object, authFilePath);
+
+        // Act
+        var result = await provider.GetUsageAsync(config);
+
+        // Assert
+        var usage = Assert.IsType<StatusProviderUsage>(Assert.Single(result));
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(ProviderUsageState.Missing, usage.State);
+        Assert.Equal("Grok CLI session missing - run grok login", usage.Description);
+        Assert.Equal("Grok CLI auth session", usage.AuthSource);
+    }
+
+    [Fact]
+    public void Definition_DeclaresFlatWeeklyAndOnDemandCards()
+    {
+        var definition = GrokProvider.StaticDefinition;
+
+        Assert.Equal(ProviderFamilyMode.FlatWindowCards, definition.FamilyMode);
+        Assert.True(definition.FlatCardShowProviderPrefix);
+
+        var weekly = Assert.Single(definition.QuotaWindows, window =>
+            string.Equals(window.ChildProviderId, "grok.weekly-credits", StringComparison.Ordinal));
+        Assert.Equal(WindowKind.Rolling, weekly.Kind);
+        Assert.Equal(TimeSpan.FromDays(7), weekly.PeriodDuration);
+
+        var onDemand = Assert.Single(definition.QuotaWindows, window =>
+            string.Equals(window.ChildProviderId, "grok.on-demand-credits", StringComparison.Ordinal));
+        Assert.Equal(WindowKind.None, onDemand.Kind);
+        Assert.Null(onDemand.PeriodDuration);
+    }
+
+    [Fact]
     public async Task GetUsageAsync_ValidResponse_MapsWeeklyCreditsCardAsync()
     {
         // Arrange
@@ -59,7 +101,7 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
         var result = await this._provider.GetUsageAsync(this.Config);
 
         // Assert
-        var usage = result.OfType<QuotaProviderUsage>().Single();
+        var usage = Assert.IsType<WindowedProviderUsage>(Assert.Single(result));
         Assert.Equal("Grok CLI", usage.ProviderName);
         Assert.Equal("Weekly", usage.Name);
         Assert.Equal("weekly-credits", usage.CardId);
@@ -67,6 +109,7 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
         Assert.Equal(WindowKind.Rolling, usage.WindowKind);
         Assert.Equal(TimeSpan.FromDays(7), usage.PeriodDuration);
         Assert.NotNull(usage.NextResetTime);
+        Assert.Equal(DateTimeKind.Utc, usage.NextResetTime.Value.Kind);
         Assert.True(usage.IsAvailable);
         Assert.Contains("79", usage.Description, StringComparison.Ordinal);
         Assert.Contains("GrokBuild", usage.Description, StringComparison.Ordinal);
@@ -102,7 +145,7 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
         var result = await this._provider.GetUsageAsync(this.Config);
 
         // Assert
-        var cards = result.OfType<QuotaProviderUsage>().ToList();
+        var cards = result.Select(Assert.IsType<WindowedProviderUsage>).ToList();
         Assert.Equal(2, cards.Count);
 
         var onDemand = cards.Single(card => string.Equals(card.CardId, "on-demand-credits", StringComparison.Ordinal));
@@ -196,6 +239,27 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
         var usage = result.OfType<StatusProviderUsage>().Single();
         Assert.False(usage.IsAvailable);
         Assert.Contains("No billing data", usage.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_ConnectedWithoutBillingValues_PreservesAuthSourceAsync()
+    {
+        // Arrange
+        this.Config.AuthSource = "Grok CLI auth session";
+        this.SetupHttpResponse(BillingEndpoint, new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent(JsonSerializer.Serialize(new { config = new { } })),
+        });
+
+        // Act
+        var result = await this._provider.GetUsageAsync(this.Config);
+
+        // Assert
+        var usage = Assert.IsType<StatusProviderUsage>(Assert.Single(result));
+        Assert.True(usage.IsAvailable);
+        Assert.Equal("Connected (no billing data reported)", usage.Description);
+        Assert.Equal("Grok CLI auth session", usage.AuthSource);
     }
 
     [Fact]

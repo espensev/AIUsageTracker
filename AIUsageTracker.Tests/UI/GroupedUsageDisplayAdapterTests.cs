@@ -841,8 +841,8 @@ public class GroupedUsageDisplayAdapterTests
         Assert.Equal(2, sonnet.UsedPercent, 1);
         Assert.Equal(5, allModels.UsedPercent, 1);
 
-        // PeriodDuration resolved from the provider's Rolling QuotaWindowDefinition (same for all flat cards)
-        Assert.Equal(TimeSpan.FromDays(7), currentSession.PeriodDuration);
+        // Each duration comes from the matching declared quota window.
+        Assert.Equal(TimeSpan.FromHours(5), currentSession.PeriodDuration);
         Assert.Equal(TimeSpan.FromDays(7), sonnet.PeriodDuration);
         Assert.Equal(TimeSpan.FromDays(7), allModels.PeriodDuration);
     }

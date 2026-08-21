@@ -171,6 +171,8 @@ public static class GroupedUsageProjectionService
                     ModelName = GetName(u) ?? string.Empty,
                     UsedPercentage = usedPercentage,
                     RemainingPercentage = remainingPercentage,
+                    RequestsUsed = q?.RequestsUsed ?? 0,
+                    RequestsAvailable = q?.RequestsAvailable ?? 0,
                     NextResetTime = q?.NextResetTime,
                     ResetCreditsAvailable = q?.ResetCreditsAvailable,
                     ResetCreditExpirationsUtc = q?.ResetCreditExpirationsUtc,

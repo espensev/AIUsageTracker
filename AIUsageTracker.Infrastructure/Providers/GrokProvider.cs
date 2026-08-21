@@ -19,6 +19,9 @@ namespace AIUsageTracker.Infrastructure.Providers;
 /// </summary>
 public class GrokProvider : ProviderBase
 {
+    private const string GrokProviderId = "grok";
+    private const string WeeklyCardId = "weekly-credits";
+    private const string OnDemandCardId = "on-demand-credits";
     private const string BillingEndpoint = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 
     private readonly HttpClient _httpClient;
@@ -33,11 +36,13 @@ public class GrokProvider : ProviderBase
     }
 
     public static ProviderDefinition StaticDefinition { get; } = new(
-        "grok",
+        GrokProviderId,
         "Grok CLI",
         PlanType.Coding,
         isQuotaBased: true)
     {
+        FamilyMode = ProviderFamilyMode.FlatWindowCards,
+        FlatCardShowProviderPrefix = true,
         AdditionalHandledProviderIds = new[] { "grok-cli" },
         SettingsMode = ProviderSettingsMode.SessionAuthStatus,
         SessionStatusLabel = "Grok CLI",
@@ -57,7 +62,18 @@ public class GrokProvider : ProviderBase
         },
         QuotaWindows = new QuotaWindowDefinition[]
         {
-            new(WindowKind.Rolling, "Weekly", PeriodDuration: TimeSpan.FromDays(7)),
+            new(
+                WindowKind.Rolling,
+                "Weekly",
+                ChildProviderId: GrokProviderId + "." + WeeklyCardId,
+                SettingsLabel: "Weekly credits",
+                PeriodDuration: TimeSpan.FromDays(7)),
+            new(
+                WindowKind.None,
+                "On-Demand",
+                ChildProviderId: GrokProviderId + "." + OnDemandCardId,
+                SettingsLabel: "On-Demand credits",
+                DisplayAsFraction: true),
         },
     };
 
@@ -97,8 +113,15 @@ public class GrokProvider : ProviderBase
             {
                 ProviderId = config.ProviderId,
                 ApiKey = token,
-                AuthSource = config.AuthSource ?? "Grok CLI session auth",
+                Limit = config.Limit,
+                BaseUrl = config.BaseUrl,
+                ShowInTray = config.ShowInTray,
+                EnableNotifications = config.EnableNotifications,
+                EnabledSubTrays = config.EnabledSubTrays,
+                AuthSource = string.IsNullOrWhiteSpace(config.AuthSource) ? "Grok CLI session auth" : config.AuthSource,
                 Description = config.Description,
+                Models = config.Models,
+                ShowCachedModelsWhenOffline = config.ShowCachedModelsWhenOffline,
             };
 
         var fetchResult = await this.FetchJsonAsync<GrokBillingResponse>(
@@ -135,7 +158,7 @@ public class GrokProvider : ProviderBase
         var cards = new List<ProviderUsage>();
 
         var resetTime = TryReadIsoTimestamp(billing.CurrentPeriod?.End ?? billing.BillingPeriodEnd, out var parsedReset)
-            ? (DateTime?)parsedReset.ToLocalTime()
+            ? (DateTime?)parsedReset
             : null;
 
         if (billing.CreditUsagePercent.HasValue)
@@ -152,15 +175,15 @@ public class GrokProvider : ProviderBase
 
             if (resetTime.HasValue)
             {
-                description += $" | resets {resetTime.Value.ToString("MMM dd HH:mm", CultureInfo.InvariantCulture)}";
+                description += $" | resets {resetTime.Value.ToLocalTime().ToString("MMM dd HH:mm", CultureInfo.InvariantCulture)}";
             }
 
-            cards.Add(new QuotaProviderUsage
+            cards.Add(new WindowedProviderUsage
             {
                 ProviderId = this.ProviderId,
                 ProviderName = providerLabel,
                 Name = "Weekly",
-                CardId = "weekly-credits",
+                CardId = WeeklyCardId,
                 GroupId = this.ProviderId,
                 IsAvailable = true,
                 UsedPercent = usedPercent,
@@ -183,12 +206,12 @@ public class GrokProvider : ProviderBase
             var onDemandPercent = UsageMath.ClampPercent(cap > 0 ? used * 100.0 / cap : 0);
             var remaining = Math.Max(0, cap - used);
 
-            cards.Add(new QuotaProviderUsage
+            cards.Add(new WindowedProviderUsage
             {
                 ProviderId = this.ProviderId,
                 ProviderName = providerLabel,
                 Name = "On-Demand",
-                CardId = "on-demand-credits",
+                CardId = OnDemandCardId,
                 GroupId = this.ProviderId,
                 IsAvailable = true,
                 UsedPercent = onDemandPercent,
@@ -212,6 +235,7 @@ public class GrokProvider : ProviderBase
                 ProviderName = providerLabel,
                 IsAvailable = true,
                 Description = "Connected (no billing data reported)",
+                AuthSource = authSource ?? string.Empty,
                 RawJson = rawJson,
                 HttpStatus = httpStatus,
             });
@@ -288,7 +312,7 @@ public class GrokProvider : ProviderBase
 
         if (DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
         {
-            timestamp = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            timestamp = parsed;
             return true;
         }
 
@@ -324,12 +348,6 @@ public class GrokProvider : ProviderBase
 
     private sealed class GrokUsagePeriod
     {
-        [JsonPropertyName("type")]
-        public string? Type { get; set; }
-
-        [JsonPropertyName("start")]
-        public string? Start { get; set; }
-
         [JsonPropertyName("end")]
         public string? End { get; set; }
     }
@@ -340,7 +358,7 @@ public class GrokProvider : ProviderBase
     private sealed class GrokCreditValue
     {
         [JsonPropertyName("val")]
-        public long Val { get; set; }
+        public double Val { get; set; }
     }
 
     private sealed class GrokProductUsage

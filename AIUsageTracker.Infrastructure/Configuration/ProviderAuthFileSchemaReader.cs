@@ -16,41 +16,41 @@ internal static class ProviderAuthFileSchemaReader
     {
         foreach (var schema in schemas)
         {
-            if (!TryResolveSchemaRoot(root, schema.RootProperty, out var sessionRoot) ||
-                sessionRoot.ValueKind != JsonValueKind.Object)
+            foreach (var sessionRoot in ResolveSchemaRoots(root, schema.RootProperty))
             {
-                continue;
+                if (sessionRoot.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var accessToken = sessionRoot.ReadString(schema.AccessTokenProperty);
+                if (string.IsNullOrWhiteSpace(accessToken))
+                {
+                    continue;
+                }
+
+                var accountId = !string.IsNullOrWhiteSpace(schema.AccountIdProperty)
+                    ? sessionRoot.ReadString(schema.AccountIdProperty)
+                    : null;
+
+                var identityToken = !string.IsNullOrWhiteSpace(schema.IdentityTokenProperty)
+                    ? sessionRoot.ReadString(schema.IdentityTokenProperty)
+                    : null;
+
+                return new ProviderAuthData(accessToken, accountId, identityToken);
             }
-
-            var accessToken = sessionRoot.ReadString(schema.AccessTokenProperty);
-            if (string.IsNullOrWhiteSpace(accessToken))
-            {
-                continue;
-            }
-
-            var accountId = !string.IsNullOrWhiteSpace(schema.AccountIdProperty)
-                ? sessionRoot.ReadString(schema.AccountIdProperty)
-                : null;
-
-            var identityToken = !string.IsNullOrWhiteSpace(schema.IdentityTokenProperty)
-                ? sessionRoot.ReadString(schema.IdentityTokenProperty)
-                : null;
-
-            return new ProviderAuthData(accessToken, accountId, identityToken);
         }
 
         return null;
     }
 
-    private static bool TryResolveSchemaRoot(
+    private static IEnumerable<JsonElement> ResolveSchemaRoots(
         JsonElement root,
-        string rootProperty,
-        out JsonElement sessionRoot)
+        string rootProperty)
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
-            sessionRoot = default;
-            return false;
+            yield break;
         }
 
         // Wildcard schemas ("<prefix>*") match any root property by prefix. This supports
@@ -65,13 +65,11 @@ internal static class ProviderAuthFileSchemaReader
                 if (property.Name.StartsWith(prefix, StringComparison.Ordinal) &&
                     property.Value.ValueKind == JsonValueKind.Object)
                 {
-                    sessionRoot = property.Value;
-                    return true;
+                    yield return property.Value;
                 }
             }
 
-            sessionRoot = default;
-            return false;
+            yield break;
         }
 
         var parts = rootProperty.Split('.');
@@ -91,7 +89,9 @@ internal static class ProviderAuthFileSchemaReader
                     : next;
             });
 
-        sessionRoot = navigated ?? default;
-        return navigated.HasValue;
+        if (navigated.HasValue)
+        {
+            yield return navigated.Value;
+        }
     }
 }

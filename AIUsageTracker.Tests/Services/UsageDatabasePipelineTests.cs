@@ -181,6 +181,62 @@ public sealed class UsageDatabasePipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task Pipeline_GrokCards_PreserveIdentityThroughDatabaseRoundTripAsync()
+    {
+        var db = await this.CreateDatabaseAsync();
+        var fetchedAt = DateTime.UtcNow.AddMinutes(-1);
+        var usages = new ProviderUsage[]
+        {
+            new WindowedProviderUsage
+            {
+                ProviderId = "grok",
+                ProviderName = "Grok CLI",
+                CardId = "weekly-credits",
+                GroupId = "grok",
+                Name = "Weekly",
+                WindowKind = WindowKind.Rolling,
+                UsedPercent = 21,
+                IsAvailable = true,
+                Description = "79% weekly credits remaining",
+                FetchedAt = fetchedAt,
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = "grok",
+                ProviderName = "Grok CLI",
+                CardId = "on-demand-credits",
+                GroupId = "grok",
+                Name = "On-Demand",
+                WindowKind = WindowKind.None,
+                RequestsUsed = 25,
+                RequestsAvailable = 100,
+                UsedPercent = 25,
+                IsAvailable = true,
+                Description = "75 / 100 on-demand credits remaining",
+                FetchedAt = fetchedAt,
+            },
+        };
+
+        var processed = this._pipeline.Process(usages, activeProviderIds: ["grok"], isPrivacyMode: false);
+        await db.StoreHistoryAsync(processed.Usages);
+
+        var persisted = await db.GetLatestHistoryAsync(["grok"]);
+        Assert.Equal(2, persisted.Count);
+
+        var weekly = Assert.IsType<WindowedProviderUsage>(
+            Assert.Single(persisted, usage => string.Equals((usage as QuotaProviderUsage)?.CardId, "weekly-credits", StringComparison.Ordinal)));
+        Assert.Equal("grok", weekly.GroupId);
+        Assert.Equal("Weekly", weekly.Name);
+        Assert.Equal(WindowKind.Rolling, weekly.WindowKind);
+
+        var onDemand = Assert.IsType<WindowedProviderUsage>(
+            Assert.Single(persisted, usage => string.Equals((usage as QuotaProviderUsage)?.CardId, "on-demand-credits", StringComparison.Ordinal)));
+        Assert.Equal("grok", onDemand.GroupId);
+        Assert.Equal("On-Demand", onDemand.Name);
+        Assert.Equal(WindowKind.None, onDemand.WindowKind);
+    }
+
+    [Fact]
     public async Task Pipeline_ResetCreditExpirations_ReachTooltipAfterDatabaseRoundTripAsync()
     {
         var db = await this.CreateDatabaseAsync();

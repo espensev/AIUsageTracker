@@ -14,10 +14,12 @@ namespace AIUsageTracker.Core.Models;
 /// <param name="SettingsLabel">Human-readable label for the settings show/hide list. Falls back to <see cref="DualBarLabel"/> when null.</param>
 /// <param name="DetailName">Reserved for legacy compatibility. No longer used for runtime matching.</param>
 /// <param name="PeriodDuration">Duration of this quota window (e.g. <c>TimeSpan.FromHours(5)</c> for a burst window, <c>TimeSpan.FromDays(7)</c> for a weekly window). Used by the UI and alert service to compute time-adjusted pace so that progress-bar colours and threshold notifications are not false-positive when the user is under pace.</param>
+/// <param name="DisplayAsFraction">Whether this card displays raw used/available values instead of percentages.</param>
 public sealed record QuotaWindowDefinition(
     WindowKind Kind,
     string DualBarLabel,
     string? ChildProviderId = null,
     string? SettingsLabel = null,
     string? DetailName = null,
-    TimeSpan? PeriodDuration = null);
+    TimeSpan? PeriodDuration = null,
+    bool DisplayAsFraction = false);

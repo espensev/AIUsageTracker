@@ -14,6 +14,10 @@ public sealed class AgentGroupedModelUsage
 
     public double? RemainingPercentage { get; set; }
 
+    public double RequestsUsed { get; set; }
+
+    public double RequestsAvailable { get; set; }
+
     public DateTime? NextResetTime { get; set; }
 
     /// <summary>
