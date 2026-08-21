@@ -170,6 +170,7 @@ public class GrokProvider : ProviderBase
                 PlanType = this.Definition.PlanType,
                 IsQuotaBased = this.Definition.IsQuotaBased,
                 Description = description,
+                AuthSource = authSource ?? string.Empty,
                 RawJson = rawJson,
                 HttpStatus = httpStatus,
             });
@@ -197,6 +198,7 @@ public class GrokProvider : ProviderBase
                 PlanType = this.Definition.PlanType,
                 IsQuotaBased = this.Definition.IsQuotaBased,
                 Description = $"{remaining.ToString(CultureInfo.InvariantCulture)} / {cap.ToString(CultureInfo.InvariantCulture)} on-demand credits remaining",
+                AuthSource = authSource ?? string.Empty,
                 RawJson = rawJson,
                 HttpStatus = httpStatus,
             });
@@ -313,17 +315,11 @@ public class GrokProvider : ProviderBase
         [JsonPropertyName("onDemandUsed")]
         public GrokCreditValue? OnDemandUsed { get; set; }
 
-        [JsonPropertyName("prepaidBalance")]
-        public GrokCreditValue? PrepaidBalance { get; set; }
-
         [JsonPropertyName("productUsage")]
         public List<GrokProductUsage>? ProductUsage { get; set; }
 
         [JsonPropertyName("billingPeriodEnd")]
         public string? BillingPeriodEnd { get; set; }
-
-        [JsonPropertyName("subscriptionTier")]
-        public string? SubscriptionTier { get; set; }
     }
 
     private sealed class GrokUsagePeriod
