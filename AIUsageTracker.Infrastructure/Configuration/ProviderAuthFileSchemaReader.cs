@@ -47,6 +47,12 @@ internal static class ProviderAuthFileSchemaReader
         string rootProperty,
         out JsonElement sessionRoot)
     {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            sessionRoot = default;
+            return false;
+        }
+
         // Wildcard schemas ("<prefix>*") match any root property by prefix. This supports
         // issuer-scoped auth stores (e.g. "https://auth.x.ai::*" for the Grok CLI) whose
         // property names embed a dynamic segment (the OIDC client id). Such names contain

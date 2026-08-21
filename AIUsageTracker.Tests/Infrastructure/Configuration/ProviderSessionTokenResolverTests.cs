@@ -127,4 +127,49 @@ public class ProviderSessionTokenResolverTests
             TestTempPaths.CleanupPath(testRoot);
         }
     }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public async Task TryResolveAsync_NonObjectAuthRoot_ReturnsNullAsync(string authContent)
+    {
+        var testRoot = TestTempPaths.CreateDirectory("provider-session-token-resolver-non-object");
+
+        try
+        {
+            var authFilePath = Path.Combine(testRoot, "auth.json");
+            await File.WriteAllTextAsync(authFilePath, authContent);
+
+            var pathProvider = new Mock<IAppPathProvider>();
+            pathProvider.Setup(provider => provider.GetUserProfileRoot()).Returns(testRoot);
+
+            var definition = new ProviderDefinition(
+                "grok",
+                "Grok CLI",
+                PlanType.Coding,
+                isQuotaBased: true)
+            {
+                AuthIdentityCandidatePathTemplates = new[] { authFilePath },
+                SessionAuthFileSchemas = new[]
+                {
+                    new ProviderAuthFileSchema("https://auth.x.ai::*", "key", "user_id"),
+                },
+            };
+
+            var resolver = new ProviderSessionTokenResolver(
+                definition.CreateAuthDiscoverySpec(),
+                "Grok CLI auth session",
+                "Grok session",
+                NullLogger<TokenDiscoveryService>.Instance,
+                pathProvider.Object);
+
+            var resolved = await resolver.TryResolveAsync();
+
+            Assert.Null(resolved);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(testRoot);
+        }
+    }
 }

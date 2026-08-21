@@ -113,6 +113,73 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
     }
 
     [Fact]
+    public async Task GetUsageAsync_OnDemandUsageExceedsCap_ClampsRemainingCreditsAsync()
+    {
+        // Arrange
+        var responseContent = JsonSerializer.Serialize(new
+        {
+            config = new
+            {
+                creditUsagePercent = 10.0,
+                onDemandCap = new { val = 100 },
+                onDemandUsed = new { val = 125 },
+            },
+        });
+
+        this.SetupHttpResponse(BillingEndpoint, new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent(responseContent),
+        });
+
+        // Act
+        var result = await this._provider.GetUsageAsync(this.Config);
+
+        // Assert
+        var onDemand = result
+            .OfType<QuotaProviderUsage>()
+            .Single(card => string.Equals(card.CardId, "on-demand-credits", StringComparison.Ordinal));
+        Assert.Equal(100.0, onDemand.UsedPercent, 1);
+        Assert.Equal("0 / 100 on-demand credits remaining", onDemand.Description);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public async Task GetUsageAsync_NonObjectAuthRoot_FallsBackToConfiguredTokenAsync(string authContent)
+    {
+        // Arrange
+        var testRoot = TestTempPaths.CreateDirectory("grok-provider-non-object-auth");
+
+        try
+        {
+            var authFilePath = Path.Combine(testRoot, "auth.json");
+            await File.WriteAllTextAsync(authFilePath, authContent);
+
+            var provider = new GrokProvider(this.HttpClient, this.Logger.Object, authFilePath);
+            this.SetupHttpResponse(BillingEndpoint, new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    config = new { creditUsagePercent = 10.0 },
+                })),
+            });
+
+            // Act
+            var result = await provider.GetUsageAsync(this.Config);
+
+            // Assert
+            var usage = result.OfType<QuotaProviderUsage>().Single();
+            Assert.True(usage.IsAvailable);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(testRoot);
+        }
+    }
+
+    [Fact]
     public async Task GetUsageAsync_MissingConfig_ReturnsUnavailableAsync()
     {
         // Arrange

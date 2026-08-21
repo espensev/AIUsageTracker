@@ -20,7 +20,6 @@ namespace AIUsageTracker.Infrastructure.Providers;
 public class GrokProvider : ProviderBase
 {
     private const string BillingEndpoint = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
-    private const string AuthScopePrefix = "https://auth.x.ai::";
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<GrokProvider> _logger;
@@ -181,6 +180,7 @@ public class GrokProvider : ProviderBase
             var cap = billing.OnDemandCap.Val;
             var used = billing.OnDemandUsed?.Val ?? 0;
             var onDemandPercent = UsageMath.ClampPercent(cap > 0 ? used * 100.0 / cap : 0);
+            var remaining = Math.Max(0, cap - used);
 
             cards.Add(new QuotaProviderUsage
             {
@@ -196,7 +196,7 @@ public class GrokProvider : ProviderBase
                 DisplayAsFraction = true,
                 PlanType = this.Definition.PlanType,
                 IsQuotaBased = this.Definition.IsQuotaBased,
-                Description = $"{(cap - used).ToString(CultureInfo.InvariantCulture)} / {cap.ToString(CultureInfo.InvariantCulture)} on-demand credits remaining",
+                Description = $"{remaining.ToString(CultureInfo.InvariantCulture)} / {cap.ToString(CultureInfo.InvariantCulture)} on-demand credits remaining",
                 RawJson = rawJson,
                 HttpStatus = httpStatus,
             });
@@ -245,23 +245,10 @@ public class GrokProvider : ProviderBase
             {
                 var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
-                foreach (var scope in doc.RootElement.EnumerateObject())
+                var authData = ProviderAuthFileSchemaReader.Read(doc.RootElement, StaticDefinition.SessionAuthFileSchemas);
+                if (authData != null)
                 {
-                    if (!scope.Name.StartsWith(AuthScopePrefix, StringComparison.Ordinal) ||
-                        scope.Value.ValueKind != JsonValueKind.Object)
-                    {
-                        continue;
-                    }
-
-                    if (scope.Value.TryGetProperty("key", out var keyElement) &&
-                        keyElement.ValueKind == JsonValueKind.String)
-                    {
-                        var key = keyElement.GetString();
-                        if (!string.IsNullOrWhiteSpace(key))
-                        {
-                            return key;
-                        }
-                    }
+                    return authData.AccessToken;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
