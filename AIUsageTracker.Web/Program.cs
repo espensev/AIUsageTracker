@@ -7,7 +7,15 @@ using Serilog;
 
 try
 {
-    var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    // Environment override keeps tests and non-standard deployments from touching the
+    // user's real %LOCALAPPDATA%\AIUsageTracker data (GetFolderPath ignores LOCALAPPDATA).
+    const string LocalAppDataRootEnvironmentVariable = "AIUSAGETRACKER_LOCAL_APP_DATA_ROOT";
+    var appData = Environment.GetEnvironmentVariable(LocalAppDataRootEnvironmentVariable);
+    if (string.IsNullOrWhiteSpace(appData))
+    {
+        appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    }
+
     var app = WebApplicationBootstrapper.Build(args, appData);
     await app.RunAsync().ConfigureAwait(false);
 }

@@ -84,19 +84,25 @@ public class WebDatabaseService : IWebDatabaseRepository
             SELECT
                 h.provider_id AS ProviderId,
                 MIN(p.provider_name) AS ProviderName,
-                datetime((strftime('%s', h.fetched_at) / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
+                datetime((CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                        THEN CAST(h.fetched_at AS INTEGER)
+                        ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END
+                    / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
                 AVG(h.requests_percentage) AS UsedPercent,
                 MAX(h.requests_used) AS RequestsUsed
             FROM provider_history h
             JOIN providers p ON h.provider_id = p.provider_id
-            WHERE h.fetched_at >= @CutoffUtc
-            GROUP BY h.provider_id, (strftime('%s', h.fetched_at) / @BucketSeconds)
+            WHERE h.fetched_at >= (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN strftime('%s', @CutoffUtc) ELSE @CutoffUtc END)
+            GROUP BY h.provider_id, (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN CAST(h.fetched_at AS INTEGER)
+                    ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END / @BucketSeconds)
             ORDER BY Timestamp ASC";
 
     private const string SpendingTrendSql = @"
             WITH normalized AS (
                 SELECT h.provider_id AS ProviderId,
-                       MIN(p.provider_name) AS ProviderName,
+                       p.provider_name AS ProviderName,
                        h.requests_used AS Amount,
                        CASE
                            WHEN typeof(h.fetched_at) IN ('integer', 'real')
@@ -106,10 +112,11 @@ public class WebDatabaseService : IWebDatabaseRepository
                 FROM provider_history h
                 JOIN providers p ON h.provider_id = p.provider_id
                 WHERE h.provider_id IN @ProviderIds
-                  AND h.fetched_at >= @CutoffUtc
+                  AND h.fetched_at >= (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                      THEN strftime('%s', @CutoffUtc) ELSE @CutoffUtc END)
             )
             SELECT ProviderId,
-                   ProviderName,
+                   MIN(ProviderName) AS ProviderName,
                    Day AS Date,
                    MAX(Amount) AS Amount
             FROM normalized
@@ -384,7 +391,8 @@ public class WebDatabaseService : IWebDatabaseRepository
                 AVG(h.requests_percentage) AS AvgUsedPercent
             FROM provider_history h
             JOIN providers p ON h.provider_id = p.provider_id
-            WHERE h.fetched_at >= @CutoffUtc
+            WHERE h.fetched_at >= (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN strftime('%s', @CutoffUtc) ELSE @CutoffUtc END)
               AND (h.model_name IS NOT NULL OR h.name IS NOT NULL)
             GROUP BY COALESCE(h.model_name, h.name, h.provider_id)
             ORDER BY TotalUsed DESC";
@@ -403,14 +411,20 @@ public class WebDatabaseService : IWebDatabaseRepository
             SELECT
                 h.provider_id AS ProviderId,
                 MIN(p.provider_name) AS ProviderName,
-                datetime((strftime('%s', h.fetched_at) / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
+                datetime((CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                        THEN CAST(h.fetched_at AS INTEGER)
+                        ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END
+                    / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
                 AVG(h.response_latency_ms) AS AvgLatencyMs,
                 MAX(h.response_latency_ms) AS MaxLatencyMs
             FROM provider_history h
             JOIN providers p ON h.provider_id = p.provider_id
-            WHERE h.fetched_at >= @CutoffUtc
+            WHERE h.fetched_at >= (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN strftime('%s', @CutoffUtc) ELSE @CutoffUtc END)
               AND h.response_latency_ms > 0
-            GROUP BY h.provider_id, (strftime('%s', h.fetched_at) / @BucketSeconds)
+            GROUP BY h.provider_id, (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN CAST(h.fetched_at AS INTEGER)
+                    ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END / @BucketSeconds)
             ORDER BY Timestamp ASC";
 
         return await this.QueryDisplayNamedListIfDatabaseAvailableAsync(
@@ -427,14 +441,20 @@ public class WebDatabaseService : IWebDatabaseRepository
             SELECT
                 h.provider_id AS ProviderId,
                 MIN(p.provider_name) AS ProviderName,
-                datetime((strftime('%s', h.fetched_at) / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
+                datetime((CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                        THEN CAST(h.fetched_at AS INTEGER)
+                        ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END
+                    / @BucketSeconds) * @BucketSeconds, 'unixepoch') AS Timestamp,
                 SUM(CASE WHEN h.http_status >= 200 AND h.http_status < 300 THEN 1 ELSE 0 END) AS SuccessCount,
                 SUM(CASE WHEN h.http_status >= 400 THEN 1 ELSE 0 END) AS ErrorCount,
                 COUNT(*) AS TotalCount
             FROM provider_history h
             JOIN providers p ON h.provider_id = p.provider_id
-            WHERE h.fetched_at >= @CutoffUtc
-            GROUP BY h.provider_id, (strftime('%s', h.fetched_at) / @BucketSeconds)
+            WHERE h.fetched_at >= (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN strftime('%s', @CutoffUtc) ELSE @CutoffUtc END)
+            GROUP BY h.provider_id, (CASE WHEN typeof(h.fetched_at) IN ('integer', 'real')
+                    THEN CAST(h.fetched_at AS INTEGER)
+                    ELSE CAST(strftime('%s', h.fetched_at) AS INTEGER) END / @BucketSeconds)
             ORDER BY Timestamp ASC";
 
         return await this.QueryDisplayNamedListIfDatabaseAvailableAsync(

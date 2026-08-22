@@ -18,7 +18,7 @@ internal static class WebRuntimePathResolver
         var dataProtectionKeyDirectory = EnsureWritableDirectory(
             Path.Combine(writableAppRoot, "web-data-protection"),
             Path.Combine(runtimeFallbackRoot, "web-data-protection"));
-        var databasePath = ResolveDatabasePath(localAppDataRoot, Path.Combine(runtimeFallbackRoot, "db-snapshot"));
+        var databasePath = ResolveDatabasePath(localAppDataRoot);
 
         return new WebRuntimePaths(
             writableAppRoot,
@@ -38,9 +38,9 @@ internal static class WebRuntimePathResolver
         return fallbackPath;
     }
 
-    public static string ResolveDatabasePath(string localAppDataRoot, string snapshotRoot)
+    public static string ResolveDatabasePath(string localAppDataRoot)
     {
-        return WebDatabasePathResolver.Resolve(localAppDataRoot, snapshotRoot);
+        return GetCanonicalDatabasePath(localAppDataRoot);
     }
 
     private static bool TryEnsureDirectory(string path)
@@ -68,6 +68,11 @@ internal static class WebRuntimePathResolver
     private static string GetCanonicalLogDirectory(string localAppDataRoot)
     {
         return Path.Combine(GetCanonicalAppDataRoot(localAppDataRoot), "logs");
+    }
+
+    private static string GetCanonicalDatabasePath(string localAppDataRoot)
+    {
+        return Path.Combine(GetCanonicalAppDataRoot(localAppDataRoot), "usage.db");
     }
 
     internal readonly record struct WebRuntimePaths(
