@@ -4,6 +4,7 @@
 
 using System.Net;
 using System.Text.RegularExpressions;
+using AIUsageTracker.Tests.Infrastructure;
 
 namespace AIUsageTracker.Web.Tests;
 
@@ -293,6 +294,102 @@ public class ViewTests : WebTestBase
         using var response = await client.GetAsync("/");
         var html = await ReadBodyAsync(response);
         Assert.IsTrue(HasClass(html, "theme-toggle"), "Theme selector should expose the theme-toggle compatibility class");
+    }
+
+    [TestMethod]
+    public async Task Layout_RendersNumericVersion_NotRazorTokenAsync()
+    {
+        using var client = CreateClient();
+        using var response = await client.GetAsync("/");
+        var html = await ReadBodyAsync(response);
+
+        Assert.IsFalse(
+            html.Contains("v@version", StringComparison.Ordinal),
+            "Razor email-parsing ate @version; footer must use v@(version).");
+        Assert.IsTrue(
+            Regex.IsMatch(html, @"v(?:dev|\d+\.\d+\.\d+)", RegexOptions.CultureInvariant, RegexTimeout),
+            "Sidebar footer should render the assembly version.");
+    }
+
+    [TestMethod]
+    public async Task Dashboard_ShowsCurrentUsageBeforeReliabilityAsync()
+    {
+        using var client = CreateClient();
+        using var response = await client.GetAsync("/");
+        var html = await ReadBodyAsync(response);
+
+        var usageIndex = html.IndexOf("Current Usage", StringComparison.Ordinal);
+        var reliabilityIndex = html.IndexOf("Provider Reliability", StringComparison.Ordinal);
+        Assert.IsTrue(usageIndex >= 0, "Dashboard should include the Current Usage heading.");
+        Assert.IsTrue(reliabilityIndex >= 0, "Dashboard should include the Provider Reliability heading.");
+        Assert.IsTrue(
+            usageIndex < reliabilityIndex,
+            "Current usage should appear before reliability so quota is the first working surface.");
+    }
+
+    [TestMethod]
+    public async Task Dashboard_DoesNotMislabelUnavailableProvidersAsPausedAsync()
+    {
+        using var client = CreateClient();
+        using var response = await client.GetAsync("/");
+        var html = await ReadBodyAsync(response);
+
+        Assert.IsFalse(
+            Regex.IsMatch(
+                html,
+                @"provider-status\s+inactive[^>]*>\s*Paused\s*</span>",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                RegexTimeout),
+            "Unavailable, missing, expired, or failed providers must use their typed state instead of 'Paused'.");
+    }
+
+    [TestMethod]
+    public async Task Dashboard_RendersGrokAsOneOrderedProviderFamilyAsync()
+    {
+        using var client = CreateClient();
+        using var response = await client.GetAsync("/");
+        var html = await ReadBodyAsync(response);
+
+        var grokTopLevelCards = Regex.Matches(
+            html,
+            "class=\"provider-card\"[^>]*data-provider-id=\"grok\"",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            RegexTimeout);
+        Assert.AreEqual(1, grokTopLevelCards.Count, "Grok should render as one top-level provider family.");
+        Assert.IsTrue(
+            html.Contains("data-provider-id=\"grok\" data-card-id=\"weekly-credits\"", StringComparison.OrdinalIgnoreCase),
+            "The declaration-ordered Weekly card should be the Grok primary card.");
+
+        var weeklyIndex = html.IndexOf("Weekly", StringComparison.Ordinal);
+        var onDemandIndex = html.IndexOf("On-Demand", StringComparison.Ordinal);
+        Assert.IsTrue(weeklyIndex >= 0, "The Weekly Grok card label should render.");
+        Assert.IsTrue(onDemandIndex >= 0, "The On-Demand Grok card label should render.");
+        Assert.IsTrue(weeklyIndex < onDemandIndex, "Grok cards should follow provider-definition order.");
+    }
+
+    [TestMethod]
+    public async Task ProviderPage_EmptyFixture_HasExplicitNoHistoryContractAsync()
+    {
+        var localAppDataRoot = TestTempPaths.CreateDirectory("aiusagetracker-web-empty-fixture");
+        try
+        {
+            WebTestDatabaseFixture.CreateEmpty(localAppDataRoot);
+            using var factory = new KestrelWebApplicationFactory<Program>(localAppDataRoot);
+            using var client = new HttpClient { BaseAddress = new Uri(factory.ServerAddress) };
+            using var response = await client.GetAsync("/provider/openai");
+            var html = await ReadBodyAsync(response);
+
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+            Assert.IsTrue(
+                html.Contains("Provider not found or no history available.", StringComparison.Ordinal),
+                "The empty fixture should render the explicit no-history state.");
+            Assert.IsFalse(html.Contains("Usage History", StringComparison.OrdinalIgnoreCase));
+            Assert.IsFalse(html.Contains("<table", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(localAppDataRoot);
+        }
     }
 
     private static bool HasClass(string html, string className)

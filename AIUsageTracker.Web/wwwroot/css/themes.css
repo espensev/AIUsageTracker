@@ -320,12 +320,15 @@
 
 /* Sidebar Footer */
 .sidebar-footer {
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 0.85rem 0.85rem;
     border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
 }
 
 .agent-section {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0;
 }
 
 .agent-status-row {
@@ -360,9 +363,9 @@
 .agent-status-detail {
     font-size: 0.7rem;
     color: var(--text-muted);
-    line-height: 1.25;
-    margin-bottom: 0.5rem;
-    min-height: 1.75em;
+    line-height: 1.35;
+    margin-bottom: 0;
+    min-height: 0;
 }
 
 .agent-status-detail.error {
@@ -393,7 +396,7 @@
     font-size: 0.7rem;
     color: var(--text-muted);
     text-align: center;
-    margin-top: 0.5rem;
+    margin-top: 0.15rem;
 }
 
 /* Main Content */

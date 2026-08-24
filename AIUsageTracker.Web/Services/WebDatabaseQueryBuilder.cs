@@ -9,17 +9,24 @@ internal static class WebDatabaseQueryBuilder
     public static string BuildLatestUsageQuery(bool includeInactive)
     {
         var sql = @"
-            SELECT h.*, p.provider_name as ProviderName 
+            SELECT h.*,
+                   p.provider_name AS ProviderName,
+                   p.account_name AS AccountName,
+                   p.auth_source AS AuthSource
             FROM provider_history h
             JOIN providers p ON h.provider_id = p.provider_id
-            WHERE h.id IN (SELECT MAX(id) FROM provider_history GROUP BY provider_id)";
+            WHERE h.id IN (
+                SELECT MAX(id)
+                FROM provider_history
+                GROUP BY provider_id, card_id
+            )";
 
         if (!includeInactive)
         {
             sql += " AND p.is_active = 1 AND h.is_available = 1";
         }
 
-        return sql;
+        return sql + " ORDER BY h.provider_id, h.card_id";
     }
 
     public static string BuildHistoryQuery(int limit)

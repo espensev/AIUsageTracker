@@ -105,52 +105,6 @@ else
     {
         <div class="alert alert-info">No HTTP status history available yet.</div>
     }
-
-    @* Section 4: Details JSON Panel *@
-    <div class="section-header">
-        <h2 class="mb-2">Provider Details (Latest)</h2>
-    </div>
-    @if (Model.DetailsEntries.Count > 0)
-    {
-        <div class="details-grid">
-            @foreach (var entry in Model.DetailsEntries)
-            {
-                <div class="details-card">
-                    <div class="details-header">
-                        <span class="provider-name">@entry.ProviderName</span>
-                        <span class="details-timestamp">@entry.FetchedAt.ToLocalTime().ToString("g")</span>
-                    </div>
-                    <div class="details-json-container">
-                        <pre class="details-json"><code>@FormatDetailsJson(entry.DetailsJson)</code></pre>
-                    </div>
-                </div>
-            }
-        </div>
-    }
-    else
-    {
-        <div class="alert alert-info">No details_json data available from recent provider snapshots.</div>
-    }
-}
-
-@functions {
-    static string FormatDetailsJson(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return "{}";
-        }
-
-        try
-        {
-            var doc = System.Text.Json.JsonDocument.Parse(json);
-            return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        }
-        catch
-        {
-            return json;
-        }
-    }
 }
 
 @section Scripts {

@@ -3,15 +3,20 @@
 // </copyright>
 
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
 using AIUsageTracker.Core.Services;
 using AIUsageTracker.Infrastructure.Configuration;
-using AIUsageTracker.Infrastructure.Services;
 using AIUsageTracker.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.OutputCaching;
 
 namespace AIUsageTracker.Web.Pages;
+
+public sealed record ProviderUsageFamily(
+    string ProviderId,
+    ProviderUsage PrimaryCard,
+    IReadOnlyList<ProviderUsage> SiblingCards);
 
 [OutputCache(PolicyName = "DashboardCache")]
 public class IndexModel : PageModel
@@ -64,6 +69,38 @@ public class IndexModel : PageModel
     public int ColorThresholdYellow { get; set; } = 60;
 
     public int ColorThresholdRed { get; set; } = 80;
+
+    public static IReadOnlyList<ProviderUsageFamily> ProjectProviderFamilies(
+        IEnumerable<ProviderUsage> usageRows)
+    {
+        ArgumentNullException.ThrowIfNull(usageRows);
+
+        return usageRows
+            .GroupBy(
+                usage => ProviderMetadataCatalog.GetProviderOwnerId(usage.ProviderId),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var definition = ProviderMetadataCatalog.Find(group.Key);
+                var declaredOrder = BuildDeclaredCardOrder(definition);
+                var orderedCards = group
+                    .GroupBy(GetUsageCardKey, StringComparer.OrdinalIgnoreCase)
+                    .Select(cardGroup => cardGroup
+                        .OrderByDescending(usage => usage.FetchedAt)
+                        .First())
+                    .OrderBy(usage => GetDeclaredCardIndex(usage, declaredOrder))
+                    .ThenBy(usage => (usage as QuotaProviderUsage)?.CardId, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(usage => usage.ProviderId, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return new ProviderUsageFamily(
+                    group.Key,
+                    orderedCards[0],
+                    orderedCards.Skip(1).ToList());
+            })
+            .OrderBy(family => family.ProviderId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     public async Task OnGetAsync([FromQuery] bool? showUsed)
     {
@@ -141,7 +178,7 @@ public class IndexModel : PageModel
             return;
         }
 
-        var latestUsageTask = this._dbService.GetLatestUsageAsync(includeInactive: this.ShowInactiveProviders);
+        var latestUsageTask = this._dbService.GetLatestUsageAsync(includeInactive: true);
         var summaryTask = this._dbService.GetUsageSummaryAsync();
 
         await Task.WhenAll(latestUsageTask, summaryTask).ConfigureAwait(false);
@@ -154,8 +191,12 @@ public class IndexModel : PageModel
             return;
         }
 
-        await this.LoadAnalyticsAsync(this.LatestUsage.Select(x => x.ProviderId).ToList()).ConfigureAwait(false);
-        await this.LoadSparklineDataAsync(this.LatestUsage.Select(x => x.ProviderId).ToList()).ConfigureAwait(false);
+        var providerIds = this.LatestUsage
+            .Select(usage => ProviderMetadataCatalog.GetProviderOwnerId(usage.ProviderId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        await this.LoadAnalyticsAsync(providerIds).ConfigureAwait(false);
+        await this.LoadSparklineDataAsync(providerIds).ConfigureAwait(false);
     }
 
     private async Task LoadAnalyticsAsync(IReadOnlyList<string> providerIds)
@@ -221,5 +262,48 @@ public class IndexModel : PageModel
             Secure = true,
             SameSite = SameSiteMode.Strict,
         });
+    }
+
+    private static string GetUsageCardKey(ProviderUsage usage)
+    {
+        if (usage is QuotaProviderUsage quota && !string.IsNullOrWhiteSpace(quota.CardId))
+        {
+            return $"card:{quota.CardId}";
+        }
+
+        return $"provider:{usage.ProviderId}:{usage.GetType().Name}";
+    }
+
+    private static int GetDeclaredCardIndex(
+        ProviderUsage usage,
+        IReadOnlyDictionary<string, int> declaredOrder)
+    {
+        return usage is QuotaProviderUsage quota &&
+               !string.IsNullOrWhiteSpace(quota.CardId) &&
+               declaredOrder.TryGetValue(quota.CardId, out var index)
+            ? index
+            : int.MaxValue;
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildDeclaredCardOrder(ProviderDefinition? definition)
+    {
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (definition == null)
+        {
+            return order;
+        }
+
+        var prefix = definition.ProviderId + ".";
+        for (var index = 0; index < definition.QuotaWindows.Count; index++)
+        {
+            var childProviderId = definition.QuotaWindows[index].ChildProviderId;
+            if (!string.IsNullOrWhiteSpace(childProviderId) &&
+                childProviderId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                order[childProviderId[prefix.Length..]] = index;
+            }
+        }
+
+        return order;
     }
 }

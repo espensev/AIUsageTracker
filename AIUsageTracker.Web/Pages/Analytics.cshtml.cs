@@ -26,8 +26,6 @@ public class AnalyticsModel : PageModel
 
     public IReadOnlyList<HttpStatusHistoryPoint> HttpStatusData { get; private set; } = [];
 
-    public IReadOnlyList<DetailsJsonEntry> DetailsEntries { get; private set; } = [];
-
     public bool IsDatabaseAvailable => this._dbService.IsDatabaseAvailable();
 
     public int SelectedHours { get; set; } = 24;
@@ -44,14 +42,12 @@ public class AnalyticsModel : PageModel
         var modelTask = this._dbService.GetModelUsageBreakdownAsync(168);
         var latencyTask = this._dbService.GetLatencyTrendAsync(hours);
         var httpTask = this._dbService.GetHttpStatusHistoryAsync(hours);
-        var detailsTask = this._dbService.GetRecentDetailsJsonAsync(20);
 
-        await Task.WhenAll(modelTask, latencyTask, httpTask, detailsTask).ConfigureAwait(false);
+        await Task.WhenAll(modelTask, latencyTask, httpTask).ConfigureAwait(false);
 
         this.ModelBreakdown = await modelTask.ConfigureAwait(false);
         this.LatencyData = await latencyTask.ConfigureAwait(false);
         this.HttpStatusData = await httpTask.ConfigureAwait(false);
-        this.DetailsEntries = await detailsTask.ConfigureAwait(false);
     }
 
     public async Task<IActionResult> OnGetAnalyticsPayloadAsync(int hours = 24)
