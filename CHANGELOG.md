@@ -5,7 +5,11 @@
 ### Added
 
 - **Grok CLI provider** — surfaces xAI SuperGrok weekly credit usage and on-demand credits. Session auth is auto-discovered from `~/.grok/auth.json` using a wildcard issuer-scoped schema; token is re-read on every refresh because the CLI rotates it every few hours. Missing session renders as "Grok CLI session missing - run grok login".
-- **Wildcard root properties in `ProviderAuthFileSchema`** — a schema `RootProperty` ending in `*` (e.g. `https://auth.x.ai::*`) now matches any root property by prefix, enabling issuer-scoped auth stores whose property names embed a dynamic segment (the OIDC client id). Such property names contain dots and are matched whole instead of being dot-navigated.
+- **Wildcard root properties in `ProviderAuthFileSchema`** — a schema `RootProperty` ending in `*` (e.g. `https://auth.x.ai::*`) now matches any root property by prefix, enabling issuer-scoped auth stores whose property names embed a dynamic segment (the OIDC client id). Such property names contain dots and are matched whole instead of being dot-navigated. When multiple roots match (e.g. two client-id entries left by a CLI upgrade), the newest unexpired session wins via the schema's optional created/expiry timestamp properties.
+
+### Security
+
+- **Monitor loopback API secured with bearer auth (contract v2)** — the `/api/*` endpoints now require `Authorization: Bearer <token>` using the ACL-protected access token stored in `monitor.json` (`MonitorInfoPersistence.AclToken`). `/api/health` remains unauthenticated. The API contract version has been bumped from 1 to 2 (`MonitorApiContract.Version`). Provider configuration responses are redacted via the new `ProviderConfigResponse` DTO — `api_key` and other secrets are no longer returned to API consumers. Known limitation: the `/hubs/usage` SignalR hub is not yet authenticated.
 
 ## [2.4.6-beta.2] - 2026-07-27
 

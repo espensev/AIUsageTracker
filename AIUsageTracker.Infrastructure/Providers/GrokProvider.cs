@@ -58,7 +58,14 @@ public class GrokProvider : ProviderBase
             // The Grok CLI stores sessions under an issuer-scoped root property whose name
             // embeds the OIDC client id ("https://auth.x.ai::<client-id>"), so the schema
             // uses a wildcard root that matches any client id.
-            new ProviderAuthFileSchema("https://auth.x.ai::*", "key", "user_id"),
+            // create_time/expires_at let the reader pick the newest unexpired session when a
+            // CLI upgrade leaves more than one client-id root in the auth file.
+            new ProviderAuthFileSchema(
+                "https://auth.x.ai::*",
+                "key",
+                "user_id",
+                CreatedAtProperty: "create_time",
+                ExpiresAtProperty: "expires_at"),
         },
         QuotaWindows = new QuotaWindowDefinition[]
         {
@@ -90,11 +97,9 @@ public class GrokProvider : ProviderBase
 
         // The Grok CLI rotates its OIDC access token every few hours and rewrites the auth
         // file on each run, so prefer a live read over the token captured at discovery time.
-        var token = await this.LoadNativeTokenAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            token = config.ApiKey;
-        }
+        var nativeToken = await this.LoadNativeTokenAsync(cancellationToken).ConfigureAwait(false);
+        var usedNativeToken = !string.IsNullOrWhiteSpace(nativeToken);
+        var token = usedNativeToken ? nativeToken : config.ApiKey;
 
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -107,18 +112,26 @@ public class GrokProvider : ProviderBase
             };
         }
 
+        // Auth-source attribution is decided by whether the native session file supplied the
+        // token, not by comparing token strings: a native token that happens to equal the
+        // configured key must still be attributed to the CLI session.
+        var authSource = usedNativeToken && string.IsNullOrWhiteSpace(config.AuthSource)
+            ? "Grok CLI session auth"
+            : config.AuthSource;
+
         var effectiveConfig = string.Equals(token, config.ApiKey, StringComparison.Ordinal)
+            && string.Equals(authSource, config.AuthSource, StringComparison.Ordinal)
             ? config
             : new ProviderConfig
             {
                 ProviderId = config.ProviderId,
-                ApiKey = token,
+                ApiKey = token!,
                 Limit = config.Limit,
                 BaseUrl = config.BaseUrl,
                 ShowInTray = config.ShowInTray,
                 EnableNotifications = config.EnableNotifications,
                 EnabledSubTrays = config.EnabledSubTrays,
-                AuthSource = string.IsNullOrWhiteSpace(config.AuthSource) ? "Grok CLI session auth" : config.AuthSource,
+                AuthSource = authSource,
                 Description = config.Description,
                 Models = config.Models,
                 ShowCachedModelsWhenOffline = config.ShowCachedModelsWhenOffline,

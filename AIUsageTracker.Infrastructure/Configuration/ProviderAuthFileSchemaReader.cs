@@ -2,6 +2,7 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.Globalization;
 using System.Text.Json;
 using AIUsageTracker.Core.Helpers;
 using AIUsageTracker.Core.Models;
@@ -13,9 +14,22 @@ internal static class ProviderAuthFileSchemaReader
     public static ProviderAuthData? Read(
         JsonElement root,
         IEnumerable<ProviderAuthFileSchema> schemas)
+        => Read(root, schemas, DateTimeOffset.UtcNow);
+
+    public static ProviderAuthData? Read(
+        JsonElement root,
+        IEnumerable<ProviderAuthFileSchema> schemas,
+        DateTimeOffset utcNow)
     {
         foreach (var schema in schemas)
         {
+            // A wildcard root can match multiple entries (e.g. two client-id roots left behind
+            // by a CLI upgrade). Selection rule: an unexpired entry beats an expired one, then
+            // the newest created-at wins, then the first entry in file order. Schemas without
+            // timestamp properties keep the original first-non-empty-token behavior.
+            ProviderAuthData? best = null;
+            var bestRank = (NotExpired: false, CreatedAt: DateTimeOffset.MinValue);
+
             foreach (var sessionRoot in ResolveSchemaRoots(root, schema.RootProperty))
             {
                 if (sessionRoot.ValueKind != JsonValueKind.Object)
@@ -29,6 +43,15 @@ internal static class ProviderAuthFileSchemaReader
                     continue;
                 }
 
+                var expiresAt = ReadTimestamp(sessionRoot, schema.ExpiresAtProperty);
+                var rank = (
+                    NotExpired: expiresAt == null || expiresAt > utcNow,
+                    CreatedAt: ReadTimestamp(sessionRoot, schema.CreatedAtProperty) ?? DateTimeOffset.MinValue);
+                if (best != null && rank.CompareTo(bestRank) <= 0)
+                {
+                    continue;
+                }
+
                 var accountId = !string.IsNullOrWhiteSpace(schema.AccountIdProperty)
                     ? sessionRoot.ReadString(schema.AccountIdProperty)
                     : null;
@@ -37,11 +60,31 @@ internal static class ProviderAuthFileSchemaReader
                     ? sessionRoot.ReadString(schema.IdentityTokenProperty)
                     : null;
 
-                return new ProviderAuthData(accessToken, accountId, identityToken);
+                best = new ProviderAuthData(accessToken, accountId, identityToken);
+                bestRank = rank;
+            }
+
+            if (best != null)
+            {
+                return best;
             }
         }
 
         return null;
+    }
+
+    private static DateTimeOffset? ReadTimestamp(JsonElement sessionRoot, string? propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+        {
+            return null;
+        }
+
+        var raw = sessionRoot.ReadString(propertyName);
+        return !string.IsNullOrWhiteSpace(raw) &&
+               DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed
+            : null;
     }
 
     private static IEnumerable<JsonElement> ResolveSchemaRoots(

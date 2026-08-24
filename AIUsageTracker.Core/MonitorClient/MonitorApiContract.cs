@@ -6,7 +6,7 @@ namespace AIUsageTracker.Core.MonitorClient;
 
 public static class MonitorApiContract
 {
-    public const string CurrentVersion = "1";
+    public const string CurrentVersion = "2";
     public const string MinimumClientVersion = CurrentVersion;
 
     public static readonly string[] ContractVersionJsonKeys =

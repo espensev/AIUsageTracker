@@ -156,14 +156,17 @@ public sealed class UsageDatabaseDedupTests : IDisposable
     [Fact]
     public async Task StoreHistoryAsync_ChangedUsedPercent_InsertsNewRowAsync()
     {
-        // Previously tested Details JSON changes; now tests flat card UsedPercent changes
+        // Percentage-only cards (e.g. the Grok weekly card) set UsedPercent with both request
+        // fields at zero and a status text rounded to whole percents, so requests_percentage is
+        // the only compared field that moves. The dedup gate must insert a new row rather than
+        // collapse the change into a timestamp touch.
         var db = await this.CreateDatabaseAsync();
         var t1 = DateTime.UtcNow.AddMinutes(-5);
 
-        await db.StoreHistoryAsync([MakeUsage("codex", requestsUsed: 50, fetchedAt: t1)]);
-        await db.StoreHistoryAsync([MakeUsage("codex", requestsUsed: 75, fetchedAt: t1.AddMinutes(5))]);
+        await db.StoreHistoryAsync([MakePercentageOnlyUsage("grok", usedPercent: 62.4, fetchedAt: t1)]);
+        await db.StoreHistoryAsync([MakePercentageOnlyUsage("grok", usedPercent: 62.2, fetchedAt: t1.AddMinutes(5))]);
 
-        Assert.Equal(2, this.CountRows("codex"));
+        Assert.Equal(2, this.CountRows("grok"));
     }
 
     [Fact]
@@ -341,6 +344,27 @@ public sealed class UsageDatabaseDedupTests : IDisposable
             Description = statusMessage,
             HttpStatus = httpStatus,
             FetchedAt = fetchedAt == default ? DateTime.UtcNow : fetchedAt,
+        };
+    }
+
+    private static ProviderUsage MakePercentageOnlyUsage(string providerId, double usedPercent, DateTime fetchedAt)
+    {
+        return new WindowedProviderUsage
+        {
+            ProviderId = providerId,
+            ProviderName = providerId,
+            CardId = "weekly-credits",
+            GroupId = providerId,
+            Name = "Weekly",
+            WindowKind = WindowKind.Rolling,
+            UsedPercent = usedPercent,
+            IsAvailable = true,
+
+            // Status text is rounded to whole percents by the provider, so it is identical
+            // across these polls — only requests_percentage changes.
+            Description = "38% weekly credits remaining",
+            HttpStatus = 200,
+            FetchedAt = fetchedAt,
         };
     }
 

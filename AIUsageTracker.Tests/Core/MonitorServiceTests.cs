@@ -228,6 +228,67 @@ public class MonitorServiceTests
     }
 
     [Fact]
+    public async Task GetConfigsAsync_UsesMetadataBearerAndReturnsRedactedCredentialStateAsync()
+    {
+        var tempDirectory = this.CreateTempDirectory();
+        const string accessToken = "monitor-client-test-token-that-is-long-enough";
+
+        try
+        {
+            var infoPath = await this.CreateMonitorInfoAsync(tempDirectory, new MonitorInfo
+            {
+                Port = 5333,
+                ProcessId = 4242,
+                AccessToken = accessToken,
+            });
+            var launcher = new MonitorLauncher(
+                monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+                healthCheckOverride: port => Task.FromResult(port == 5333),
+                processRunningOverride: processId => Task.FromResult(processId == 4242));
+            var service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
+            service.AgentUrl = "http://localhost:5000";
+            HttpRequestMessage? capturedRequest = null;
+
+            this._mockHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.IsAny<HttpRequestMessage>(),
+                    ItExpr.IsAny<CancellationToken>())
+                .Returns<HttpRequestMessage, CancellationToken>((request, _) =>
+                {
+                    capturedRequest = request;
+                    return Task.FromResult(new HttpResponseMessage
+                    {
+                        StatusCode = HttpStatusCode.OK,
+                        Content = JsonContent.Create(new[]
+                        {
+                            new ProviderConfigResponse
+                            {
+                                ProviderId = "openai",
+                                HasKey = true,
+                                IsSessionToken = true,
+                            },
+                        }),
+                    });
+                });
+
+            var configs = await service.GetConfigsAsync();
+
+            var config = Assert.Single(configs);
+            Assert.Equal("http://localhost:5333/api/config", capturedRequest?.RequestUri?.ToString());
+            Assert.Equal("Bearer", capturedRequest?.Headers.Authorization?.Scheme);
+            Assert.Equal(accessToken, capturedRequest?.Headers.Authorization?.Parameter);
+            Assert.Empty(config.ApiKey);
+            Assert.True(config.HasStoredApiKey);
+            Assert.True(config.HasStoredSessionToken);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(tempDirectory);
+        }
+    }
+
+    [Fact]
     public async Task GetUsageAsync_RequestTimesOut_RefreshesEndpointAndRetriesAsync()
     {
         var tempDirectory = this.CreateTempDirectory();
@@ -486,7 +547,7 @@ public class MonitorServiceTests
         var responseObj = new
         {
             status = "healthy",
-            contractVersion = "1.3",
+            contractVersion = "2.3",
             agentVersion = "2.1.3",
         };
         this.SetupMockResponse(HttpStatusCode.OK, responseObj);
@@ -497,7 +558,7 @@ public class MonitorServiceTests
         // Assert
         Assert.True(result.IsReachable);
         Assert.True(result.IsCompatible);
-        Assert.Equal("1.3", result.AgentContractVersion);
+        Assert.Equal("2.3", result.AgentContractVersion);
         this.VerifyPath("/api/health");
     }
 
@@ -508,8 +569,8 @@ public class MonitorServiceTests
         var responseObj = new
         {
             status = "healthy",
-            contractVersion = "1.3",
-            minClientContractVersion = "2.0",
+            contractVersion = "2.3",
+            minClientContractVersion = "3.0",
             agentVersion = "2.1.3",
         };
         this.SetupMockResponse(HttpStatusCode.OK, responseObj);
@@ -520,8 +581,8 @@ public class MonitorServiceTests
         // Assert
         Assert.True(result.IsReachable);
         Assert.False(result.IsCompatible);
-        Assert.Equal("1.3", result.AgentContractVersion);
-        Assert.Equal("2.0", result.MinClientContractVersion);
+        Assert.Equal("2.3", result.AgentContractVersion);
+        Assert.Equal("3.0", result.MinClientContractVersion);
         Assert.Contains("requires client contract", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -532,7 +593,7 @@ public class MonitorServiceTests
         var responseObj = new
         {
             status = "healthy",
-            contractVersion = "2.0",
+            contractVersion = "3.0",
             agentVersion = "2.1.3",
         };
         this.SetupMockResponse(HttpStatusCode.OK, responseObj);
@@ -543,7 +604,7 @@ public class MonitorServiceTests
         // Assert
         Assert.True(result.IsReachable);
         Assert.False(result.IsCompatible);
-        Assert.Equal("2.0", result.AgentContractVersion);
+        Assert.Equal("3.0", result.AgentContractVersion);
         Assert.Contains("major mismatch", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -570,28 +631,28 @@ public class MonitorServiceTests
     [Fact]
     public void EvaluateApiContractCompatibility_AllowsMatchingMajor()
     {
-        var result = MonitorService.EvaluateApiContractCompatibility("1.7", minClientContractVersion: null, "2.1.3");
+        var result = MonitorService.EvaluateApiContractCompatibility("2.7", minClientContractVersion: null, "2.1.3");
 
         Assert.True(result.IsReachable);
         Assert.True(result.IsCompatible);
-        Assert.Equal("1.7", result.AgentContractVersion);
+        Assert.Equal("2.7", result.AgentContractVersion);
     }
 
     [Fact]
     public void EvaluateApiContractCompatibility_AllowsVersionPrefix()
     {
-        var result = MonitorService.EvaluateApiContractCompatibility("v1.2", "v1", "2.1.3");
+        var result = MonitorService.EvaluateApiContractCompatibility("v2.2", "v2", "2.1.3");
 
         Assert.True(result.IsReachable);
         Assert.True(result.IsCompatible);
-        Assert.Equal("v1.2", result.AgentContractVersion);
-        Assert.Equal("v1", result.MinClientContractVersion);
+        Assert.Equal("v2.2", result.AgentContractVersion);
+        Assert.Equal("v2", result.MinClientContractVersion);
     }
 
     [Fact]
     public void EvaluateApiContractCompatibility_RejectsMajorMismatch()
     {
-        var result = MonitorService.EvaluateApiContractCompatibility("2.0", minClientContractVersion: null, "2.1.3");
+        var result = MonitorService.EvaluateApiContractCompatibility("3.0", minClientContractVersion: null, "2.1.3");
 
         Assert.True(result.IsReachable);
         Assert.False(result.IsCompatible);
@@ -601,7 +662,7 @@ public class MonitorServiceTests
     [Fact]
     public void EvaluateApiContractCompatibility_RejectsWhenMinClientIsHigher()
     {
-        var result = MonitorService.EvaluateApiContractCompatibility("1.4", "1.1", "2.1.3");
+        var result = MonitorService.EvaluateApiContractCompatibility("2.4", "2.1", "2.1.3");
 
         Assert.True(result.IsReachable);
         Assert.False(result.IsCompatible);

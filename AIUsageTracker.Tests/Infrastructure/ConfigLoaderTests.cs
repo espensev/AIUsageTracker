@@ -9,33 +9,47 @@ using Moq;
 
 namespace AIUsageTracker.Tests.Infrastructure;
 
+[Collection("TokenDiscovery")]
 public class ConfigLoaderTests : IntegrationTestBase
 {
     [Fact]
     public async Task LoadConfigAsync_PreservesConfiguredProviderAliasIdsAsync()
     {
-        var authPath = this.CreateFile("config/auth.json", "{\"kimi\":{\"key\":\"kimi-test-key\",\"type\":\"quota-based\"}}");
-        var providersPath = this.CreateFile("config/providers.json", "{}");
+        var priorKimiValue = Environment.GetEnvironmentVariable("KIMI_API_KEY");
+        var priorMoonshotValue = Environment.GetEnvironmentVariable("MOONSHOT_API_KEY");
+        Environment.SetEnvironmentVariable("KIMI_API_KEY", value: null);
+        Environment.SetEnvironmentVariable("MOONSHOT_API_KEY", value: null);
 
-        var mockPathProvider = new Mock<IAppPathProvider>();
-        mockPathProvider.Setup(p => p.GetAuthFilePath()).Returns(authPath);
-        mockPathProvider.Setup(p => p.GetProviderConfigFilePath()).Returns(providersPath);
-        mockPathProvider.Setup(p => p.GetUserProfileRoot()).Returns(this.TestRootPath);
-        mockPathProvider.Setup(p => p.GetPreferencesFilePath()).Returns(Path.Combine(this.TestRootPath, "preferences.json"));
-        mockPathProvider.Setup(p => p.GetAppDataRoot()).Returns(this.TestRootPath);
-        mockPathProvider.Setup(p => p.GetDatabasePath()).Returns(Path.Combine(this.TestRootPath, "usage.db"));
-        mockPathProvider.Setup(p => p.GetLogDirectory()).Returns(Path.Combine(this.TestRootPath, "logs"));
+        try
+        {
+            var authPath = this.CreateFile("config/auth.json", "{\"kimi\":{\"key\":\"kimi-test-key\",\"type\":\"quota-based\"}}");
+            var providersPath = this.CreateFile("config/providers.json", "{}");
 
-        var loader = new JsonConfigLoader(
-            logger: NullLogger<JsonConfigLoader>.Instance,
-            tokenDiscoveryLogger: NullLogger<TokenDiscoveryService>.Instance,
-            pathProvider: mockPathProvider.Object);
+            var mockPathProvider = new Mock<IAppPathProvider>();
+            mockPathProvider.Setup(p => p.GetAuthFilePath()).Returns(authPath);
+            mockPathProvider.Setup(p => p.GetProviderConfigFilePath()).Returns(providersPath);
+            mockPathProvider.Setup(p => p.GetUserProfileRoot()).Returns(this.TestRootPath);
+            mockPathProvider.Setup(p => p.GetPreferencesFilePath()).Returns(Path.Combine(this.TestRootPath, "preferences.json"));
+            mockPathProvider.Setup(p => p.GetAppDataRoot()).Returns(this.TestRootPath);
+            mockPathProvider.Setup(p => p.GetDatabasePath()).Returns(Path.Combine(this.TestRootPath, "usage.db"));
+            mockPathProvider.Setup(p => p.GetLogDirectory()).Returns(Path.Combine(this.TestRootPath, "logs"));
 
-        var configs = await loader.LoadConfigAsync();
+            var loader = new JsonConfigLoader(
+                logger: NullLogger<JsonConfigLoader>.Instance,
+                tokenDiscoveryLogger: NullLogger<TokenDiscoveryService>.Instance,
+                pathProvider: mockPathProvider.Object);
 
-        var kimi = Assert.Single(configs, config => string.Equals(config.ProviderId, "kimi", StringComparison.Ordinal));
-        Assert.Equal("kimi-test-key", kimi.ApiKey);
-        Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "kimi-for-coding", StringComparison.Ordinal));
+            var configs = await loader.LoadConfigAsync();
+
+            var kimi = Assert.Single(configs, config => string.Equals(config.ProviderId, "kimi", StringComparison.Ordinal));
+            Assert.Equal("kimi-test-key", kimi.ApiKey);
+            Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "kimi-for-coding", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("KIMI_API_KEY", priorKimiValue);
+            Environment.SetEnvironmentVariable("MOONSHOT_API_KEY", priorMoonshotValue);
+        }
     }
 
     [Fact]

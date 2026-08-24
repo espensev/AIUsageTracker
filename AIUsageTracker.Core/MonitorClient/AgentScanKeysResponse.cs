@@ -3,7 +3,6 @@
 // </copyright>
 
 using System.Text.Json.Serialization;
-using AIUsageTracker.Core.Models;
 
 namespace AIUsageTracker.Core.MonitorClient;
 
@@ -16,5 +15,5 @@ public sealed class AgentScanKeysResponse
     public bool RefreshQueued { get; init; }
 
     [JsonPropertyName("configs")]
-    public IReadOnlyList<ProviderConfig>? Configs { get; init; }
+    public IReadOnlyList<ProviderConfigResponse>? Configs { get; init; }
 }

@@ -230,4 +230,108 @@ public class ProviderSessionTokenResolverTests
             TestTempPaths.CleanupPath(testRoot);
         }
     }
+
+    [Fact]
+    public async Task TryResolveAsync_WildcardSchemaRoots_PrefersUnexpiredEntryAsync()
+    {
+        // An expired root that appears first in file order must not mask the live session.
+        var resolved = await ResolveWildcardWithTimestampsAsync(
+            "provider-session-token-resolver-wildcard-expired",
+            firstRoot: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["key"] = "expired-token",
+                ["user_id"] = "old-user",
+                ["create_time"] = "2026-06-01T00:00:00Z",
+                ["expires_at"] = "2026-06-01T06:00:00Z",
+            },
+            secondRoot: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["key"] = "live-token",
+                ["user_id"] = "live-user",
+                ["create_time"] = "2026-01-01T00:00:00Z",
+                ["expires_at"] = "2099-01-01T00:00:00Z",
+            });
+
+        Assert.NotNull(resolved);
+        Assert.Equal("live-token", resolved!.ApiKey);
+    }
+
+    [Fact]
+    public async Task TryResolveAsync_WildcardSchemaRoots_PrefersNewestCreatedEntryAsync()
+    {
+        // Both sessions are unexpired; the newer create_time wins over file order.
+        var resolved = await ResolveWildcardWithTimestampsAsync(
+            "provider-session-token-resolver-wildcard-newest",
+            firstRoot: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["key"] = "older-token",
+                ["user_id"] = "older-user",
+                ["create_time"] = "2026-01-01T00:00:00Z",
+                ["expires_at"] = "2099-01-01T00:00:00Z",
+            },
+            secondRoot: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["key"] = "newer-token",
+                ["user_id"] = "newer-user",
+                ["create_time"] = "2026-06-01T00:00:00Z",
+                ["expires_at"] = "2099-01-01T00:00:00Z",
+            });
+
+        Assert.NotNull(resolved);
+        Assert.Equal("newer-token", resolved!.ApiKey);
+    }
+
+    private static async Task<DiscoveredSessionToken?> ResolveWildcardWithTimestampsAsync(
+        string testDirectoryName,
+        Dictionary<string, object?> firstRoot,
+        Dictionary<string, object?> secondRoot)
+    {
+        var testRoot = TestTempPaths.CreateDirectory(testDirectoryName);
+
+        try
+        {
+            var authFilePath = Path.Combine(testRoot, "auth.json");
+            var authContent = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["https://auth.x.ai::first-client"] = firstRoot,
+                ["https://auth.x.ai::second-client"] = secondRoot,
+            };
+
+            await File.WriteAllTextAsync(authFilePath, JsonSerializer.Serialize(authContent)).ConfigureAwait(false);
+
+            var pathProvider = new Mock<IAppPathProvider>();
+            pathProvider.Setup(provider => provider.GetUserProfileRoot()).Returns(testRoot);
+
+            var definition = new ProviderDefinition(
+                "grok",
+                "Grok CLI",
+                PlanType.Coding,
+                isQuotaBased: true)
+            {
+                AuthIdentityCandidatePathTemplates = new[] { authFilePath },
+                SessionAuthFileSchemas = new[]
+                {
+                    new ProviderAuthFileSchema(
+                        "https://auth.x.ai::*",
+                        "key",
+                        "user_id",
+                        CreatedAtProperty: "create_time",
+                        ExpiresAtProperty: "expires_at"),
+                },
+            };
+
+            var resolver = new ProviderSessionTokenResolver(
+                definition.CreateAuthDiscoverySpec(),
+                "Grok CLI auth session",
+                "Grok session",
+                NullLogger<TokenDiscoveryService>.Instance,
+                pathProvider.Object);
+
+            return await resolver.TryResolveAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(testRoot);
+        }
+    }
 }

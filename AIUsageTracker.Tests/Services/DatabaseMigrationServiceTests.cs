@@ -52,6 +52,10 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
         Assert.Contains("card_type", historyColumns, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("reset_credits_available", historyColumns, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("reset_credit_expirations_utc", historyColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Vestigial legacy column (ADR-004): no longer written or read, but never dropped —
+        // the compatibility bootstrap must keep carrying it so historical values survive.
+        Assert.Contains("details_json", historyColumns, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -101,11 +105,13 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
     }
 
     [Fact]
-    public void RunMigrations_LegacyDatabase_TimestampConversionPreservesCardColumns()
+    public void RunMigrations_LegacyDatabase_TimestampConversionPreservesCardColumnsAndDetailsJson()
     {
-        // Insert rows WITH card data, then run migration, then verify the data survived.
-        // This catches the bug where ConvertTimestampsToEpochIfNeeded recreated the table
-        // without copying card_type/window_kind/card_id columns.
+        // Insert rows WITH card data and a legacy details_json payload, then run migration,
+        // then verify the data survived. This catches the bug where
+        // ConvertTimestampsToEpochIfNeeded recreated the table without copying
+        // card_type/window_kind/card_id columns — and guards the vestigial details_json
+        // column (ADR-004): no longer written, but existing values must never be lost.
         this.CreateLegacySchemaWithCardData();
 
         var service = new DatabaseMigrationService(this._dbPath, NullLogger<DatabaseMigrationService>.Instance);
@@ -116,7 +122,7 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
 
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
-            SELECT card_id, group_id, window_kind, model_name, name, card_type
+            SELECT card_id, group_id, window_kind, model_name, name, card_type, details_json
             FROM provider_history WHERE provider_id = 'openai' ORDER BY id";
 
         using var reader = cmd.ExecuteReader();
@@ -127,6 +133,7 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
         Assert.Equal("gpt-4", reader.GetString(3));
         Assert.Equal("GPT-4", reader.GetString(4));
         Assert.Equal("windowed", reader.GetString(5));
+        Assert.Equal("[{\"name\":\"Spark\",\"used\":10,\"available\":50}]", reader.GetString(6));
     }
 
     [Fact]
@@ -222,6 +229,7 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
                 is_available INTEGER NOT NULL DEFAULT 1,
                 status_message TEXT NOT NULL DEFAULT '',
                 fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                details_json TEXT,
                 card_id TEXT,
                 group_id TEXT,
                 window_kind INTEGER NOT NULL DEFAULT 0,
@@ -254,9 +262,10 @@ public sealed class DatabaseMigrationServiceTests : IDisposable
             INSERT INTO provider_history
                 (provider_id, requests_used, requests_available, requests_percentage,
                  is_available, status_message, fetched_at,
-                 card_id, group_id, window_kind, model_name, name, card_type)
+                 details_json, card_id, group_id, window_kind, model_name, name, card_type)
             VALUES
                 ('openai', 100, 200, 50, 1, 'OK', '2024-01-15 10:30:00',
+                 '[{""name"":""Spark"",""used"":10,""available"":50}]',
                  'burst', 'rolling', 1, 'gpt-4', 'GPT-4', 'windowed');";
 
         using var command = connection.CreateCommand();

@@ -255,8 +255,8 @@ public sealed class MonitorProcessServiceTests : IDisposable
             Status = "healthy",
             ServiceHealth = "healthy",
             AgentVersion = "2.2.0",
-            ContractVersion = "2.0",
-            MinClientContractVersion = "2.0",
+            ContractVersion = "3.0",
+            MinClientContractVersion = "3.0",
             RefreshHealth = new MonitorRefreshHealthSnapshot
             {
                 Status = "healthy",
@@ -268,8 +268,8 @@ public sealed class MonitorProcessServiceTests : IDisposable
 
         Assert.True(result.IsRunning);
         Assert.False(result.IsContractCompatible);
-        Assert.Equal("2.0", result.ContractVersion);
-        Assert.Equal("2.0", result.MinClientContractVersion);
+        Assert.Equal("3.0", result.ContractVersion);
+        Assert.Equal("3.0", result.MinClientContractVersion);
         Assert.Contains("Contract warning", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("major mismatch", result.Message, StringComparison.OrdinalIgnoreCase);
     }

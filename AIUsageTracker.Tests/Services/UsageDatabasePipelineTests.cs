@@ -181,6 +181,44 @@ public sealed class UsageDatabasePipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task Pipeline_WeeklyPercentOnlyChange_InsertsNewHistoryRowAsync()
+    {
+        var db = await this.CreateDatabaseAsync();
+
+        static WindowedProviderUsage WeeklyCard(double usedPercent, DateTime fetchedAt) => new()
+        {
+            ProviderId = "grok",
+            ProviderName = "Grok CLI",
+            CardId = "weekly-credits",
+            GroupId = "grok",
+            Name = "Weekly",
+            WindowKind = WindowKind.Rolling,
+            UsedPercent = usedPercent,
+            IsAvailable = true,
+            Description = "38% weekly credits remaining",
+            FetchedAt = fetchedAt,
+        };
+
+        var first = this._pipeline.Process(
+            new ProviderUsage[] { WeeklyCard(62.4, DateTime.UtcNow.AddMinutes(-2)) },
+            activeProviderIds: ["grok"],
+            isPrivacyMode: false);
+        await db.StoreHistoryAsync(first.Usages);
+
+        // Same status text, same (zero) request fields, no reset time — only the raw
+        // percentage moved. Dedup must not collapse this into a timestamp touch.
+        var second = this._pipeline.Process(
+            new ProviderUsage[] { WeeklyCard(62.2, DateTime.UtcNow.AddMinutes(-1)) },
+            activeProviderIds: ["grok"],
+            isPrivacyMode: false);
+        await db.StoreHistoryAsync(second.Usages);
+
+        var persisted = await db.GetLatestHistoryAsync(["grok"]);
+        var weekly = Assert.IsType<WindowedProviderUsage>(Assert.Single(persisted));
+        Assert.Equal(62.2, weekly.UsedPercent, precision: 3);
+    }
+
+    [Fact]
     public async Task Pipeline_GrokCards_PreserveIdentityThroughDatabaseRoundTripAsync()
     {
         var db = await this.CreateDatabaseAsync();

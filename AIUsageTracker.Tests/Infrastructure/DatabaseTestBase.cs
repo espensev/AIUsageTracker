@@ -79,6 +79,14 @@ public abstract class DatabaseTestBase : IDisposable
                 fetched_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 details_json TEXT,
                 parent_provider_id TEXT REFERENCES providers(provider_id) ON DELETE SET NULL,
+                card_id TEXT,
+                group_id TEXT,
+                window_kind INTEGER NOT NULL DEFAULT 0,
+                model_name TEXT,
+                name TEXT,
+                card_type TEXT,
+                reset_credits_available INTEGER,
+                reset_credit_expirations_utc TEXT,
                 FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE
             );
 

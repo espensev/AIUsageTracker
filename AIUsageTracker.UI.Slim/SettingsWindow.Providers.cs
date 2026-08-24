@@ -77,6 +77,7 @@ public partial class SettingsWindow
         var keyPanel = new Grid { Margin = new Thickness(0, 0, 0, 0) };
         keyPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         keyPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        keyPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var keyContent = this.BuildProviderInputContent(config, usage, settingsBehavior);
         Grid.SetColumn(keyContent, 0);
@@ -87,6 +88,13 @@ public partial class SettingsWindow
             var testButton = this.BuildTestConnectionButton(config, keyContent);
             Grid.SetColumn(testButton, 1);
             keyPanel.Children.Add(testButton);
+
+            if (config.HasStoredApiKey)
+            {
+                var removeButton = this.BuildRemoveStoredKeyButton(config);
+                Grid.SetColumn(removeButton, 2);
+                keyPanel.Children.Add(removeButton);
+            }
         }
 
         Grid.SetRow(keyPanel, 1);
@@ -130,15 +138,15 @@ public partial class SettingsWindow
         bool isDerived)
     {
         var resolvedProviderId = ResolveProviderOwnerId(config.ProviderId);
-        var hasSessionToken = IsSessionToken(config.ApiKey);
+        var hasSessionToken = HasSessionCredential(config);
         var inputMode = isDerived
             ? ProviderInputMode.DerivedReadOnly
             : ResolveProviderInputMode(resolvedProviderId, usage, hasSessionToken);
         var isInactive = !isDerived && inputMode switch
         {
             ProviderInputMode.AutoDetectedStatus => usage == null || !usage.IsAvailable,
-            ProviderInputMode.SessionAuthStatus => string.IsNullOrWhiteSpace(config.ApiKey) && usage?.IsAvailable != true,
-            _ => string.IsNullOrWhiteSpace(config.ApiKey),
+            ProviderInputMode.SessionAuthStatus => !HasConfiguredCredential(config) && usage?.IsAvailable != true,
+            _ => !HasConfiguredCredential(config),
         };
         var sessionProviderLabel = inputMode == ProviderInputMode.SessionAuthStatus
             ? ProviderMetadataCatalog.Find(resolvedProviderId)?.SessionStatusLabel
@@ -154,6 +162,16 @@ public partial class SettingsWindow
     {
         return !string.IsNullOrWhiteSpace(apiKey) &&
                !apiKey.StartsWith("sk-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasConfiguredCredential(ProviderConfig config)
+    {
+        return config.HasStoredApiKey || !string.IsNullOrWhiteSpace(config.ApiKey);
+    }
+
+    private static bool HasSessionCredential(ProviderConfig config)
+    {
+        return config.HasStoredSessionToken || IsSessionToken(config.ApiKey);
     }
 
     private static string ResolveProviderOwnerId(string providerId)
@@ -348,7 +366,7 @@ public partial class SettingsWindow
     {
         var username = usage?.AccountName;
         var hasUsername = !string.IsNullOrWhiteSpace(username) && username is not ("Unknown" or "User");
-        var isAuthenticated = !string.IsNullOrWhiteSpace(config.ApiKey) ||
+        var isAuthenticated = HasConfiguredCredential(config) ||
                               usage?.IsAvailable == true ||
                               hasUsername;
         string displayText;
@@ -386,7 +404,7 @@ public partial class SettingsWindow
         var providerSessionLabel = settingsBehavior.SessionProviderLabel ??
                                    ProviderMetadataCatalog.GetConfiguredDisplayName(
                                        config.ProviderId ?? string.Empty);
-        var hasSessionToken = IsSessionToken(config.ApiKey);
+        var hasSessionToken = HasSessionCredential(config);
         var isAuthenticated = hasSessionToken || usage?.IsAvailable == true;
         var accountName = usage?.AccountName;
 
@@ -589,6 +607,9 @@ public partial class SettingsWindow
         var keyBox = new TextBox
         {
             Text = GetDisplayApiKey(config.ApiKey, this._isPrivacyMode),
+            ToolTip = config.HasStoredApiKey && string.IsNullOrWhiteSpace(config.ApiKey)
+                ? "A key is configured. Enter a new key to replace it."
+                : null,
             Tag = config,
             VerticalContentAlignment = VerticalAlignment.Center,
             FontSize = 11,
@@ -680,6 +701,50 @@ public partial class SettingsWindow
         };
 
         return button;
+    }
+
+    private Button BuildRemoveStoredKeyButton(ProviderConfig config)
+    {
+        var button = new Button
+        {
+            Content = "Remove",
+            FontSize = 10,
+            Padding = new Thickness(10, 4, 10, 4),
+            Margin = new Thickness(6, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            IsEnabled = !this._isPrivacyMode,
+            ToolTip = this._isPrivacyMode
+                ? "Disable privacy mode to remove the stored key."
+                : "Remove the stored key and provider configuration.",
+        };
+        button.SetResourceReference(Button.ForegroundProperty, ResourceKeySecondaryText);
+        button.Click += (_, _) =>
+        {
+            var confirmation = MessageBox.Show(
+                $"Remove the stored key for {ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId)}?",
+                "Remove API Key",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirmation != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            var trackedConfig = this.GetOrCreateTrackedConfig(config);
+            MarkStoredKeyForRemoval(trackedConfig);
+            this.MarkSettingsChanged();
+            this.PopulateProviders();
+        };
+        return button;
+    }
+
+    internal static void MarkStoredKeyForRemoval(ProviderConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+
+        config.ApiKey = string.Empty;
+        config.HasStoredApiKey = false;
+        config.HasStoredSessionToken = false;
     }
 
     private static FrameworkElement? BuildAuthSourcePanel(string? authSource)
@@ -958,6 +1023,8 @@ public partial class SettingsWindow
         {
             ProviderId = config.ProviderId,
             ApiKey = config.ApiKey,
+            HasStoredApiKey = config.HasStoredApiKey,
+            HasStoredSessionToken = config.HasStoredSessionToken,
             Limit = config.Limit,
             BaseUrl = config.BaseUrl,
             ShowInTray = config.ShowInTray,

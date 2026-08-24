@@ -72,24 +72,9 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
     [Fact]
     public async Task GetUsageAsync_ValidResponse_MapsWeeklyCreditsCardAsync()
     {
-        // Arrange
-        var responseContent = JsonSerializer.Serialize(new
-        {
-            config = new
-            {
-                currentPeriod = new
-                {
-                    type = "USAGE_PERIOD_TYPE_WEEKLY",
-                    start = "2026-08-18T20:39:07.120945+00:00",
-                    end = "2026-08-25T20:39:07.120945+00:00",
-                },
-                creditUsagePercent = 21.0,
-                onDemandCap = new { val = 0 },
-                onDemandUsed = new { val = 0 },
-                productUsage = new[] { new { product = "GrokBuild", usagePercent = 21.0 } },
-                prepaidBalance = new { val = 0 },
-            },
-        });
+        // Arrange — sanitized snapshot of the live Grok CLI billing response
+        // (see docs/test_fixture_sync.md).
+        var responseContent = LoadFixture("grok_billing_credits.snapshot.json");
 
         this.SetupHttpResponse(BillingEndpoint, new HttpResponseMessage
         {
@@ -129,6 +114,50 @@ public class GrokProviderTests : HttpProviderTestBase<GrokProvider>
                 ["https://auth.x.ai::test-client"] = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["key"] = "native-grok-token",
+                    ["user_id"] = "user-1",
+                },
+            };
+            await File.WriteAllTextAsync(authFilePath, JsonSerializer.Serialize(authContent));
+
+            var provider = new GrokProvider(this.HttpClient, this.Logger.Object, authFilePath);
+            this.Config.AuthSource = string.Empty;
+            this.SetupHttpResponse(BillingEndpoint, new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    config = new { creditUsagePercent = 10.0 },
+                })),
+            });
+
+            // Act
+            var result = await provider.GetUsageAsync(this.Config);
+
+            // Assert
+            var usage = Assert.IsType<WindowedProviderUsage>(Assert.Single(result));
+            Assert.Equal("Grok CLI session auth", usage.AuthSource);
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(testRoot);
+        }
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_NativeTokenEqualsConfiguredKey_DefaultsAuthSourceAsync()
+    {
+        // Arrange — the native session token matching the configured key must still be
+        // attributed to the CLI session, not left with a blank auth source.
+        var testRoot = TestTempPaths.CreateDirectory("grok-provider-equal-token-auth-source");
+
+        try
+        {
+            var authFilePath = Path.Combine(testRoot, "auth.json");
+            var authContent = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["https://auth.x.ai::test-client"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["key"] = TestToken,
                     ["user_id"] = "user-1",
                 },
             };

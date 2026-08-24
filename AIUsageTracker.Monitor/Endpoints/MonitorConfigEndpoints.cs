@@ -2,7 +2,6 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
-using AIUsageTracker.Core.Models;
 using AIUsageTracker.Core.MonitorClient;
 using AIUsageTracker.Monitor.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -17,23 +16,32 @@ internal static class MonitorConfigEndpoints
         {
             logger.LogDebug("GET {Route}", MonitorApiRoutes.Config);
             var configs = await configService.GetConfigsAsync().ConfigureAwait(false);
-            return Results.Ok(configs);
+            return Results.Ok(configs.Select(ProviderConfigResponse.FromProviderConfig));
         });
 
         app.MapPost(
             MonitorApiRoutes.Config,
             async (
-                ProviderConfig config,
+                ProviderConfigUpdateRequest request,
                 IConfigService configService,
                 ProviderRefreshService refreshService,
                 ProviderRefreshCircuitBreakerService circuitBreakerService,
                 ILogger<Program> logger) =>
         {
-            if (string.IsNullOrWhiteSpace(config.ProviderId))
+            if (string.IsNullOrWhiteSpace(request.ProviderId))
             {
                 return Results.BadRequest(new { message = "providerId is required." });
             }
 
+            var existingConfigs = await configService.GetConfigsAsync().ConfigureAwait(false);
+            var existing = existingConfigs.FirstOrDefault(config =>
+                string.Equals(config.ProviderId, request.ProviderId, StringComparison.OrdinalIgnoreCase));
+            if (request.PreserveApiKey && existing == null)
+            {
+                return Results.BadRequest(new { message = "Cannot preserve a key for an unconfigured provider." });
+            }
+
+            var config = request.ToProviderConfig(existing);
             logger.LogDebug("POST {Route} ({ProviderId})", MonitorApiRoutes.Config, config.ProviderId);
             await configService.SaveConfigAsync(config).ConfigureAwait(false);
 
@@ -71,7 +79,7 @@ internal static class MonitorConfigEndpoints
             {
                 Discovered = discovered.Count,
                 RefreshQueued = refreshQueued,
-                Configs = discovered,
+                Configs = discovered.Select(ProviderConfigResponse.FromProviderConfig).ToArray(),
             });
         });
     }
