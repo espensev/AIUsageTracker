@@ -97,6 +97,9 @@ public class TokenDiscoveryIntegrationTests : IntegrationTestBase
     [Fact]
     public async Task DiscoverTokensAsync_FindsEnvironmentVariableAliasesFromProviderMetadataAsync()
     {
+        var priorKimiValue = Environment.GetEnvironmentVariable("KIMI_API_KEY");
+        var priorMoonshotValue = Environment.GetEnvironmentVariable("MOONSHOT_API_KEY");
+        Environment.SetEnvironmentVariable("KIMI_API_KEY", value: null);
         Environment.SetEnvironmentVariable("MOONSHOT_API_KEY", "env-kimi-key");
 
         try
@@ -109,7 +112,8 @@ public class TokenDiscoveryIntegrationTests : IntegrationTestBase
         }
         finally
         {
-            Environment.SetEnvironmentVariable("MOONSHOT_API_KEY", value: null);
+            Environment.SetEnvironmentVariable("KIMI_API_KEY", priorKimiValue);
+            Environment.SetEnvironmentVariable("MOONSHOT_API_KEY", priorMoonshotValue);
         }
     }
 

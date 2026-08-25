@@ -140,7 +140,7 @@ public static class GroupedUsageProjectionService
                 !q.IsCurrencyUsage &&
                 GetWindowKind(u) == WindowKind.None);
 
-        return BuildModelsFromFlatCards(cardCandidates);
+        return BuildModelsFromFlatCards(cardCandidates, definition);
     }
 
     private static string? GetCardId(ProviderUsage u) =>
@@ -153,13 +153,19 @@ public static class GroupedUsageProjectionService
         (u as WindowedProviderUsage)?.WindowKind ?? (u as ModelScopedProviderUsage)?.WindowKind ?? WindowKind.None;
 
     private static List<AgentGroupedModelUsage> BuildModelsFromFlatCards(
-        IEnumerable<ProviderUsage> group)
+        IEnumerable<ProviderUsage> group,
+        ProviderDefinition? definition)
     {
+        // The definition's QuotaWindows declaration order is the card order authority;
+        // transport/alphabetical order must not drive rendering. Cards not declared in
+        // the definition (dynamic flat providers) sort after declared ones, by card ID.
+        var declaredOrder = BuildDeclaredCardOrder(definition);
         return group
             .Where(u => !string.IsNullOrWhiteSpace(GetCardId(u)) && !string.IsNullOrWhiteSpace(GetName(u)))
             .GroupBy(u => GetCardId(u)!, StringComparer.OrdinalIgnoreCase)
             .Select(cardGroup => cardGroup.OrderByDescending(u => u.FetchedAt).First())
-            .OrderBy(u => GetCardId(u), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(u => declaredOrder.TryGetValue(GetCardId(u)!, out var index) ? index : int.MaxValue)
+            .ThenBy(u => GetCardId(u), StringComparer.OrdinalIgnoreCase)
             .Select(u =>
             {
                 var q = u as QuotaProviderUsage;
@@ -171,6 +177,8 @@ public static class GroupedUsageProjectionService
                     ModelName = GetName(u) ?? string.Empty,
                     UsedPercentage = usedPercentage,
                     RemainingPercentage = remainingPercentage,
+                    RequestsUsed = q?.RequestsUsed ?? 0,
+                    RequestsAvailable = q?.RequestsAvailable ?? 0,
                     NextResetTime = q?.NextResetTime,
                     ResetCreditsAvailable = q?.ResetCreditsAvailable,
                     ResetCreditExpirationsUtc = q?.ResetCreditExpirationsUtc,
@@ -181,6 +189,29 @@ public static class GroupedUsageProjectionService
                 return model;
             })
             .ToList();
+    }
+
+    private static Dictionary<string, int> BuildDeclaredCardOrder(ProviderDefinition? definition)
+    {
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (definition == null)
+        {
+            return order;
+        }
+
+        // ChildProviderId is "{providerId}.{cardId}" for declaration-backed flat cards.
+        var prefix = definition.ProviderId + ".";
+        for (var index = 0; index < definition.QuotaWindows.Count; index++)
+        {
+            var childProviderId = definition.QuotaWindows[index].ChildProviderId;
+            if (!string.IsNullOrWhiteSpace(childProviderId) &&
+                childProviderId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                order[childProviderId[prefix.Length..]] = index;
+            }
+        }
+
+        return order;
     }
 
     private static AgentGroupedQuotaBucketUsage[] BuildSummaryQuotaBuckets(

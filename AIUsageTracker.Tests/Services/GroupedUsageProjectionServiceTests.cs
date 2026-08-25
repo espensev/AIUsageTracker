@@ -4,6 +4,7 @@
 
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Monitor.Services;
+using AIUsageTracker.UI.Slim;
 
 namespace AIUsageTracker.Tests.Services;
 
@@ -306,5 +307,111 @@ public sealed class GroupedUsageProjectionServiceTests
         Assert.Equal("Minimax.io Coding Plan", minimaxCoding.ProviderName);
         Assert.Empty(minimaxIo.Models);
         Assert.Empty(minimaxCoding.Models);
+    }
+
+    [Fact]
+    public void Build_GrokFlatWindowCards_PreservesBothCardsThroughSlimAdapter()
+    {
+        var resetTime = new DateTime(2026, 8, 25, 20, 39, 7, DateTimeKind.Utc);
+        var usages = new ProviderUsage[]
+        {
+            new WindowedProviderUsage
+            {
+                ProviderId = "grok",
+                ProviderName = "Grok CLI",
+                CardId = "weekly-credits",
+                GroupId = "grok",
+                Name = "Weekly",
+                WindowKind = WindowKind.Rolling,
+                IsAvailable = true,
+                IsQuotaBased = true,
+                PlanType = PlanType.Coding,
+                UsedPercent = 21,
+                NextResetTime = resetTime,
+                PeriodDuration = TimeSpan.FromDays(7),
+                Description = "79% weekly credits remaining",
+            },
+            new WindowedProviderUsage
+            {
+                ProviderId = "grok",
+                ProviderName = "Grok CLI",
+                CardId = "on-demand-credits",
+                GroupId = "grok",
+                Name = "On-Demand",
+                WindowKind = WindowKind.None,
+                IsAvailable = true,
+                IsQuotaBased = true,
+                PlanType = PlanType.Coding,
+                UsedPercent = 25,
+                RequestsUsed = 25,
+                RequestsAvailable = 100,
+                DisplayAsFraction = true,
+                Description = "75 / 100 on-demand credits remaining",
+            },
+        };
+
+        var snapshot = GroupedUsageProjectionService.Build(usages);
+
+        var provider = Assert.Single(snapshot.Providers);
+        Assert.Equal(2, provider.Models.Count);
+
+        // The definition declares Weekly before On-Demand; the projection must follow
+        // that order, not the alphabetical card-ID order.
+        Assert.Equal("weekly-credits", provider.Models[0].ModelId);
+        Assert.Equal("on-demand-credits", provider.Models[1].ModelId);
+
+        var cards = GroupedUsageDisplayAdapter.Expand(snapshot);
+        Assert.Equal(2, cards.Count);
+        Assert.Equal("weekly-credits", cards[0].CardId);
+
+        var weekly = Assert.Single(cards, card => string.Equals(card.CardId, "weekly-credits", StringComparison.Ordinal));
+        Assert.Equal("Grok CLI (Weekly)", weekly.ProviderName);
+        Assert.Equal(21, weekly.UsedPercent);
+        Assert.Equal(resetTime, weekly.NextResetTime);
+        Assert.Equal(TimeSpan.FromDays(7), weekly.PeriodDuration);
+        Assert.False(weekly.DisplayAsFraction);
+
+        var onDemand = Assert.Single(cards, card => string.Equals(card.CardId, "on-demand-credits", StringComparison.Ordinal));
+        Assert.Equal("Grok CLI (On-Demand)", onDemand.ProviderName);
+        Assert.Equal(25, onDemand.UsedPercent);
+        Assert.Equal(25, onDemand.RequestsUsed);
+        Assert.Equal(100, onDemand.RequestsAvailable);
+        Assert.True(onDemand.DisplayAsFraction);
+        Assert.Null(onDemand.PeriodDuration);
+    }
+
+    [Fact]
+    public void Build_GrokFlatWindowCards_SortsUndeclaredCardsAfterDeclaredOnes()
+    {
+        static WindowedProviderUsage Card(string cardId, string name, WindowKind windowKind) => new()
+        {
+            ProviderId = "grok",
+            ProviderName = "Grok CLI",
+            CardId = cardId,
+            GroupId = "grok",
+            Name = name,
+            WindowKind = windowKind,
+            IsAvailable = true,
+            IsQuotaBased = true,
+            PlanType = PlanType.Coding,
+            UsedPercent = 10,
+            Description = "test card",
+        };
+
+        // "aa-extra" sorts first alphabetically but is not declared in the definition's
+        // QuotaWindows, so it must land after both declared cards.
+        var usages = new ProviderUsage[]
+        {
+            Card("aa-extra", "Extra", WindowKind.None),
+            Card("on-demand-credits", "On-Demand", WindowKind.None),
+            Card("weekly-credits", "Weekly", WindowKind.Rolling),
+        };
+
+        var snapshot = GroupedUsageProjectionService.Build(usages);
+
+        var provider = Assert.Single(snapshot.Providers);
+        Assert.Equal(
+            new[] { "weekly-credits", "on-demand-credits", "aa-extra" },
+            provider.Models.Select(model => model.ModelId).ToArray());
     }
 }

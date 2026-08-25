@@ -320,8 +320,14 @@ public class UsageDatabase : IUsageDatabase
         string newStatusMessage)
     {
         var q = usage as QuotaProviderUsage;
+
+        // requests_percentage must be compared even though it is usually derived from the two
+        // raw request fields: percentage-only cards (e.g. Grok weekly) set UsedPercent with both
+        // request fields at zero and a status text rounded to whole percents, so without this
+        // comparison distinct measurements collapse into a timestamp touch.
         return Math.Abs((q?.RequestsUsed ?? 0) - last.RequestsUsed) < 0.001
             && Math.Abs((q?.RequestsAvailable ?? 0) - last.RequestsAvailable) < 0.001
+            && Math.Abs((q?.UsedPercent ?? 0) - last.RequestsPercentage) < 0.001
             && (usage.IsAvailable ? 1L : 0L) == last.IsAvailable
             && (long)usage.HttpStatus == last.HttpStatus
             && string.Equals(newStatusMessage, last.StatusMessage ?? string.Empty, StringComparison.Ordinal)
@@ -432,6 +438,7 @@ public class UsageDatabase : IUsageDatabase
                    h.card_id AS CardId,
                    h.requests_used AS RequestsUsed,
                    h.requests_available AS RequestsAvailable,
+                   h.requests_percentage AS RequestsPercentage,
                    h.is_available AS IsAvailable,
                    h.status_message AS StatusMessage,
                    h.next_reset_time AS NextResetTime,
@@ -459,6 +466,7 @@ public class UsageDatabase : IUsageDatabase
         string? CardId,
         double RequestsUsed,
         double RequestsAvailable,
+        double RequestsPercentage,
         long IsAvailable,
         string? StatusMessage,
         string? NextResetTime,

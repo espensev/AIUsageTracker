@@ -12,6 +12,7 @@ using AIUsageTracker.Infrastructure.Services;
 using AIUsageTracker.Monitor.Endpoints;
 using AIUsageTracker.Monitor.Hubs;
 using AIUsageTracker.Monitor.Logging;
+using AIUsageTracker.Monitor.Security;
 using AIUsageTracker.Monitor.Services;
 
 namespace AIUsageTracker.Monitor;
@@ -52,6 +53,7 @@ public partial class Program
         using var loggerFactory = CreateLoggerFactory(isDebugMode, resolvedLogPath.LogFile);
 
         var logger = loggerFactory.CreateLogger("Monitor");
+        var accessToken = MonitorInfoPersistence.GetOrCreateAccessToken(pathProvider, logger);
 
         if (resolvedLogPath.UsedFallback)
         {
@@ -89,7 +91,7 @@ public partial class Program
                 holdsStartupMutex = true;
             }
 
-            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: "starting");
+            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: "starting", accessToken: accessToken);
 
             if (isDebugMode)
             {
@@ -102,7 +104,7 @@ public partial class Program
             logger.LogDebug("Configuring web host on port {Port}...", port);
             logger.LogDebug("Base Directory: {BaseDir}", AppDomain.CurrentDomain.BaseDirectory);
 
-            var app = await BuildAndStartWebAppAsync(args, port, loggerFactory, pathProvider, logger, isDebugMode).ConfigureAwait(false);
+            var app = await BuildAndStartWebAppAsync(args, port, loggerFactory, pathProvider, logger, isDebugMode, accessToken).ConfigureAwait(false);
 
             if (isDebugMode)
             {
@@ -110,14 +112,14 @@ public partial class Program
             }
 
             // Update metadata only after successful bind/start.
-            MonitorInfoPersistence.SaveMonitorInfo(port, isDebugMode, logger, pathProvider, startupStatus: "running");
+            MonitorInfoPersistence.SaveMonitorInfo(port, isDebugMode, logger, pathProvider, startupStatus: "running", accessToken: accessToken);
             await app.WaitForShutdownAsync().ConfigureAwait(false);
-            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: "stopped");
+            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: "stopped", accessToken: accessToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Monitor startup failed");
-            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: $"failed: {ex.Message}");
+            MonitorInfoPersistence.SaveMonitorInfo(0, isDebugMode, logger, pathProvider, startupStatus: $"failed: {ex.Message}", accessToken: accessToken);
             throw new InvalidOperationException("Monitor startup failed.", ex);
         }
         finally
@@ -164,7 +166,8 @@ public partial class Program
         ILoggerFactory loggerFactory,
         IAppPathProvider pathProvider,
         ILogger logger,
-        bool isDebugMode)
+        bool isDebugMode,
+        string accessToken)
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls($"http://localhost:{port}");
@@ -200,6 +203,7 @@ public partial class Program
         }
 
         app.UseCors();
+        app.UseMiddleware<MonitorApiAuthenticationMiddleware>(accessToken);
         app.MapHub<UsageHub>("/hubs/usage");
 
         if (isDebugMode)

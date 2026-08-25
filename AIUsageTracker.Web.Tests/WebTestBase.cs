@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Net.Http.Headers;
+using AIUsageTracker.Tests.Infrastructure;
 
 namespace AIUsageTracker.Web.Tests;
 
@@ -19,8 +20,18 @@ public abstract class WebTestBase
 
         if (Factory == null)
         {
-            Factory = new KestrelWebApplicationFactory<Program>();
-            ServerUrl = Factory.ServerAddress.TrimEnd('/');
+            var localAppDataRoot = TestTempPaths.CreateDirectory("aiusagetracker-web-populated-fixture");
+            try
+            {
+                WebTestDatabaseFixture.CreatePopulated(localAppDataRoot);
+                Factory = new KestrelWebApplicationFactory<Program>(localAppDataRoot);
+                ServerUrl = Factory.ServerAddress.TrimEnd('/');
+            }
+            catch
+            {
+                TestTempPaths.CleanupPath(localAppDataRoot);
+                throw;
+            }
         }
     }
 

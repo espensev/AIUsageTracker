@@ -46,6 +46,7 @@ public class ProviderMetadataCatalogTests
     [InlineData("minimax-coding-plan", "minimax-coding-plan", "Minimax.io Coding Plan")]
     [InlineData("opencode-go", "opencode-go", "OpenCode Go")]
     [InlineData("zai", "zai-coding-plan", "Z.AI")]
+    [InlineData("grok-cli", "grok", "Grok CLI")]
     public void Find_UsesProviderDefinitionsForAliases(string providerId, string expectedDefinitionId, string expectedDisplayName)
     {
         var definition = ProviderMetadataCatalog.Find(providerId);
@@ -504,6 +505,17 @@ public class ProviderMetadataCatalogTests
             var definition = Assert.IsType<ProviderDefinition>(ProviderMetadataCatalog.Find(providerId));
             Assert.Equal(ProviderSettingsMode.StandardApiKey, definition.SettingsMode);
         }
+    }
+
+    [Fact]
+    public void Find_ExposesGrokSessionAuthDiscoveryMetadata()
+    {
+        var definition = ProviderMetadataCatalog.Find("grok");
+
+        Assert.NotNull(definition);
+        Assert.Contains("%USERPROFILE%\\.grok\\auth.json", definition!.AuthIdentityCandidatePathTemplates);
+        Assert.Contains(definition.SessionAuthFileSchemas, schema => string.Equals(schema.RootProperty, "https://auth.x.ai::*", StringComparison.Ordinal) &&
+            string.Equals(schema.AccessTokenProperty, "key", StringComparison.Ordinal));
     }
 
     [Fact]

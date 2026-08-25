@@ -19,6 +19,12 @@ public class ProviderConfig
     [JsonPropertyName("api_key")]
     public string ApiKey { get; set; } = string.Empty;
 
+    [JsonIgnore]
+    public bool HasStoredApiKey { get; set; }
+
+    [JsonIgnore]
+    public bool HasStoredSessionToken { get; set; }
+
     [Range(0, double.MaxValue, ErrorMessage = "Limit must be non-negative")]
     [JsonPropertyName("limit")]
     public double? Limit { get; set; } // For cost tracking

@@ -13,11 +13,15 @@ servers:
         default: "5000"
         description: Port discovered from %LOCALAPPDATA%\AIUsageTracker\monitor.json
 
+security:
+  - monitorBearer: []
+
 paths:
   /api/health:
     get:
       summary: Agent health status
       operationId: getHealth
+      security: []
       responses:
         "200":
           description: Agent is healthy
@@ -129,7 +133,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ProviderConfig"
+              $ref: "#/components/schemas/ProviderConfigUpdateRequest"
       responses:
         "200":
           description: Configuration saved
@@ -263,6 +267,12 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
 
 components:
+  securitySchemes:
+    monitorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Per-install token read from the ACL-protected monitor.json metadata file.
   schemas:
     HealthResponse:
       type: object
@@ -281,7 +291,7 @@ components:
         contract_version:
           type: string
           description: Canonical Monitor API contract version.
-          example: "1"
+          example: "2"
         api_contract_version:
           type: string
           description: Legacy alias for contract_version. Accepted for backward-compatible deserialization and may be omitted in responses.
@@ -580,10 +590,25 @@ components:
           type: number
           format: double
           nullable: true
+        requests_used:
+          type: number
+          format: double
+        requests_available:
+          type: number
+          format: double
         next_reset_time:
           type: string
           format: date-time
           nullable: true
+        reset_credits_available:
+          type: integer
+          nullable: true
+        reset_credit_expirations_utc:
+          type: array
+          nullable: true
+          items:
+            type: string
+            format: date-time
         description:
           type: string
         effective_used_percentage:
@@ -608,6 +633,8 @@ components:
       required:
         - model_id
         - model_name
+        - requests_used
+        - requests_available
         - description
         - quota_buckets
 
@@ -729,12 +756,12 @@ components:
       properties:
         provider_id:
           type: string
-        api_key:
-          type: string
-        type:
-          type: string
-        plan_type:
-          $ref: "#/components/schemas/PlanType"
+        has_key:
+          type: boolean
+          readOnly: true
+        is_session_token:
+          type: boolean
+          readOnly: true
         limit:
           type: number
           format: double
@@ -750,11 +777,28 @@ components:
           type: array
           items:
             type: string
+        auth_source:
+          type: string
         models:
           type: array
           items:
             $ref: "#/components/schemas/AIModelConfig"
-      required: [provider_id]
+        show_cached_models_when_offline:
+          type: boolean
+      required: [provider_id, has_key, is_session_token]
+
+    ProviderConfigUpdateRequest:
+      allOf:
+        - $ref: "#/components/schemas/ProviderConfig"
+        - type: object
+          properties:
+            api_key:
+              type: string
+              writeOnly: true
+            preserve_api_key:
+              type: boolean
+              default: false
+              description: Preserve the stored key when a redacted configuration is saved unchanged.
 
     AppPreferences:
       type: object

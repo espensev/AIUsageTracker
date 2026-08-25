@@ -12,15 +12,19 @@ internal static class FlatWindowCardBuilder
 {
     internal static IReadOnlyList<QuotaProviderUsage> BuildFlatWindowCards(AgentGroupedProviderUsage provider)
     {
-        ProviderMetadataCatalog.TryGet(provider.ProviderId, out var definition);
-        var showPrefix = definition?.FlatCardShowProviderPrefix == true;
+        var definition = ProviderMetadataCatalog.Find(provider.ProviderId)
+            ?? throw new InvalidOperationException($"Provider definition not found for '{provider.ProviderId}'.");
+        var showPrefix = definition.FlatCardShowProviderPrefix;
         var parentDisplayName = showPrefix ? ProviderMetadataCatalog.GetConfiguredDisplayName(provider.ProviderId) : null;
-        var isQuotaBased = definition?.IsQuotaBased ?? provider.IsQuotaBased;
-        var planType = definition?.PlanType ?? provider.PlanType;
 
         var cards = new List<QuotaProviderUsage>(provider.Models.Count);
         foreach (var model in provider.Models)
         {
+            var windowDefinition = ResolveCardWindow(definition, model.ModelId);
+            var periodDuration = windowDefinition == null
+                ? ResolvePeriodDuration(provider.ProviderId)
+                : windowDefinition.PeriodDuration;
+            var displayAsFraction = windowDefinition?.DisplayAsFraction ?? definition.DisplayAsFraction;
             var modelState = AgentGroupedUsageValueResolver.ResolveModelEffectiveState(model, provider.IsQuotaBased);
             var cardName = showPrefix ? $"{parentDisplayName} ({model.ModelName})" : model.ModelName;
             var description = ResolveCardDescription(provider, modelState.Description);
@@ -29,26 +33,39 @@ internal static class FlatWindowCardBuilder
             {
                 ProviderId = provider.ProviderId,
                 CardId = model.ModelId,
+                GroupId = provider.ProviderId,
+                Name = model.ModelName,
                 ModelName = model.ModelName,
                 ProviderName = cardName,
                 AccountName = provider.AccountName,
                 IsAvailable = provider.IsAvailable,
                 State = provider.State,
-                PlanType = planType,
-                IsQuotaBased = isQuotaBased,
-                IsCurrencyUsage = definition?.IsCurrencyUsage ?? false,
-                RequestsUsed = modelState.UsedPercentage,
+                PlanType = definition.PlanType,
+                IsQuotaBased = definition.IsQuotaBased,
+                IsCurrencyUsage = definition.IsCurrencyUsage,
+                DisplayAsFraction = displayAsFraction,
+                RequestsUsed = displayAsFraction ? model.RequestsUsed : modelState.UsedPercentage,
+                RequestsAvailable = model.RequestsAvailable,
                 UsedPercent = modelState.UsedPercentage,
+                WindowKind = windowDefinition?.Kind ?? WindowKind.None,
                 Description = description,
                 FetchedAt = provider.FetchedAt,
                 NextResetTime = modelState.NextResetTime,
-                PeriodDuration = ResolvePeriodDuration(provider.ProviderId),
+                PeriodDuration = periodDuration,
                 ResetCreditsAvailable = model.ResetCreditsAvailable,
                 ResetCreditExpirationsUtc = model.ResetCreditExpirationsUtc,
             });
         }
 
         return cards;
+    }
+
+    private static QuotaWindowDefinition? ResolveCardWindow(ProviderDefinition definition, string cardId)
+    {
+        var childProviderId = $"{definition.ProviderId}.{cardId}";
+        return definition.QuotaWindows.FirstOrDefault(window =>
+            !string.IsNullOrWhiteSpace(window.ChildProviderId) &&
+            string.Equals(window.ChildProviderId, childProviderId, StringComparison.OrdinalIgnoreCase));
     }
 
     internal static TimeSpan? ResolvePeriodDuration(string providerId)

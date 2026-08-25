@@ -147,4 +147,58 @@ public sealed class ProviderSettingsCatalogTests
 
         Assert.Equal(ProviderInputMode.StandardApiKey, behavior.InputMode);
     }
+
+    [Fact]
+    public void Resolve_RedactedConfiguredKey_RemainsActive()
+    {
+        var config = new ProviderConfig
+        {
+            ProviderId = "deepseek",
+            ApiKey = string.Empty,
+            HasStoredApiKey = true,
+        };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.StandardApiKey, behavior.InputMode);
+        Assert.False(behavior.IsInactive);
+        Assert.False(SettingsWindow.ShouldRemoveProviderConfig(config, behavior));
+    }
+
+    [Fact]
+    public void MarkStoredKeyForRemoval_EnablesExplicitStandardProviderDeletion()
+    {
+        var config = new ProviderConfig
+        {
+            ProviderId = "deepseek",
+            ApiKey = string.Empty,
+            HasStoredApiKey = true,
+            HasStoredSessionToken = true,
+        };
+
+        SettingsWindow.MarkStoredKeyForRemoval(config);
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Empty(config.ApiKey);
+        Assert.False(config.HasStoredApiKey);
+        Assert.False(config.HasStoredSessionToken);
+        Assert.True(SettingsWindow.ShouldRemoveProviderConfig(config, behavior));
+    }
+
+    [Fact]
+    public void Resolve_RedactedSessionToken_PreservesSessionAuthMode()
+    {
+        var config = new ProviderConfig
+        {
+            ProviderId = "openai",
+            ApiKey = string.Empty,
+            HasStoredApiKey = true,
+            HasStoredSessionToken = true,
+        };
+
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal(ProviderInputMode.SessionAuthStatus, behavior.InputMode);
+        Assert.False(behavior.IsInactive);
+    }
 }

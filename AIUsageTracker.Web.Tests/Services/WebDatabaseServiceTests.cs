@@ -4,6 +4,7 @@
 
 using System.Globalization;
 using AIUsageTracker.Core.Interfaces;
+using AIUsageTracker.Core.Models;
 using AIUsageTracker.Tests.Infrastructure;
 using AIUsageTracker.Web.Services;
 using Microsoft.Data.Sqlite;
@@ -54,6 +55,34 @@ public class WebDatabaseServiceTests
         var result = await service.GetLatestUsageAsync(includeInactive: true);
 
         Assert.AreEqual(2, result.Count);
+    }
+
+    [TestMethod]
+    public async Task GetLatestUsageAsync_ReturnsLatestRowPerProviderCardAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        this.SeedGrokCardRows(databasePath);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var result = await service.GetLatestUsageAsync(includeInactive: true);
+
+        var grokRows = result
+            .Where(usage => string.Equals(usage.ProviderId, "grok", StringComparison.OrdinalIgnoreCase))
+            .Cast<WindowedProviderUsage>()
+            .ToList();
+        Assert.AreEqual(2, grokRows.Count);
+        CollectionAssert.AreEquivalent(
+            new[] { "weekly-credits", "on-demand-credits" },
+            grokRows.Select(usage => usage.CardId).ToArray());
+        var weekly = grokRows.Single(usage =>
+            string.Equals(usage.CardId, "weekly-credits", StringComparison.Ordinal));
+        Assert.AreEqual(30.0, weekly.UsedPercent, 0.01, "The latest weekly row should win.");
+        Assert.AreEqual("Weekly", weekly.Name);
+        var onDemand = grokRows.Single(usage =>
+            string.Equals(usage.CardId, "on-demand-credits", StringComparison.Ordinal));
+        Assert.IsTrue(onDemand.DisplayAsFraction);
+        Assert.AreEqual("On-Demand", onDemand.Name);
     }
 
     [TestMethod]
@@ -128,7 +157,20 @@ CREATE TABLE provider_history (
     status_message TEXT NULL,
     response_latency_ms REAL NOT NULL,
     fetched_at TEXT NOT NULL,
-    next_reset_time TEXT NULL
+    next_reset_time TEXT NULL,
+    details_json TEXT NULL,
+    http_status INTEGER NOT NULL DEFAULT 200,
+    upstream_response_validity INTEGER NOT NULL DEFAULT 0,
+    upstream_response_note TEXT NOT NULL DEFAULT '',
+    parent_provider_id TEXT NULL,
+    card_id TEXT NULL,
+    group_id TEXT NULL,
+    window_kind INTEGER NOT NULL DEFAULT 0,
+    model_name TEXT NULL,
+    name TEXT NULL,
+    card_type TEXT NULL,
+    reset_credits_available INTEGER NULL,
+    reset_credit_expirations_utc TEXT NULL
 );";
         command.ExecuteNonQuery();
 
@@ -195,6 +237,36 @@ VALUES (
     200,
     '2026-03-10 10:00:00',
     NULL);";
+        command.ExecuteNonQuery();
+    }
+
+    private void SeedGrokCardRows(string databasePath)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false,
+        }.ToString());
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+INSERT INTO providers (provider_id, provider_name, is_active, auth_source, account_name)
+VALUES ('grok', 'Grok CLI', 1, 'session', 'acct-grok');
+
+INSERT INTO provider_history (
+    provider_id, requests_used, requests_available, requests_percentage,
+    is_available, status_message, response_latency_ms, fetched_at,
+    next_reset_time, card_id, group_id, window_kind, name, card_type)
+VALUES
+    ('grok', 10, 100, 10, 1, 'old weekly', 100, '2026-03-10 09:00:00', NULL,
+     'weekly-credits', 'grok', 2, 'Weekly', 'windowed'),
+    ('grok', 30, 100, 30, 1, 'latest weekly', 100, '2026-03-10 10:00:00', NULL,
+     'weekly-credits', 'grok', 2, 'Weekly', 'windowed'),
+    ('grok', 5, 50, 10, 1, 'on demand', 100, '2026-03-10 10:00:00', NULL,
+     'on-demand-credits', 'grok', 0, 'On-Demand', 'windowed');";
         command.ExecuteNonQuery();
     }
 

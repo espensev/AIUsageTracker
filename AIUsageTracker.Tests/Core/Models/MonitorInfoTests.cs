@@ -20,6 +20,7 @@ public class MonitorInfoTests
         Assert.Null(info.Errors);
         Assert.Null(info.MachineName);
         Assert.Null(info.UserName);
+        Assert.Null(info.AccessToken);
     }
 
     [Fact]
@@ -34,6 +35,7 @@ public class MonitorInfoTests
             MachineName = "TESTMACHINE",
             UserName = "testuser",
             Errors = new List<string> { "Test error" },
+            AccessToken = "test-access-token",
         };
 
         Assert.Equal(5000, info.Port);
@@ -43,6 +45,7 @@ public class MonitorInfoTests
         Assert.Equal("TESTMACHINE", info.MachineName);
         Assert.Equal("testuser", info.UserName);
         Assert.Single(info.Errors);
+        Assert.Equal("test-access-token", info.AccessToken);
     }
 
     [Fact]
@@ -57,6 +60,7 @@ public class MonitorInfoTests
             MachineName = "TEST-PC",
             UserName = "developer",
             Errors = new List<string> { "Error 1", "Error 2" },
+            AccessToken = "test-access-token",
         };
 
         var json = JsonSerializer.Serialize(original, new JsonSerializerOptions
@@ -74,5 +78,6 @@ public class MonitorInfoTests
         Assert.Equal(original.ProcessId, deserialized.ProcessId);
         Assert.Equal(original.DebugMode, deserialized.DebugMode);
         Assert.Equal(original.Errors?.Count, deserialized.Errors?.Count);
+        Assert.Equal(original.AccessToken, deserialized.AccessToken);
     }
 }

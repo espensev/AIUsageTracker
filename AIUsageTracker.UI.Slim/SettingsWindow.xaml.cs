@@ -891,7 +891,7 @@ public partial class SettingsWindow : Window
             this._usages.FirstOrDefault(u => string.Equals(u.ProviderId, config.ProviderId, StringComparison.OrdinalIgnoreCase)),
             isDerived: false);
 
-        if (behavior.InputMode == ProviderInputMode.StandardApiKey && string.IsNullOrWhiteSpace(config.ApiKey))
+        if (ShouldRemoveProviderConfig(config, behavior))
         {
             var removed = await this._monitorService.RemoveConfigAsync(config.ProviderId).ConfigureAwait(true);
             if (!removed)
@@ -919,6 +919,13 @@ public partial class SettingsWindow : Window
         {
             failedConfigs.Add(config.ProviderId);
         }
+    }
+
+    internal static bool ShouldRemoveProviderConfig(ProviderConfig config, ProviderSettingsBehavior behavior)
+    {
+        return behavior.InputMode == ProviderInputMode.StandardApiKey &&
+               string.IsNullOrWhiteSpace(config.ApiKey) &&
+               !config.HasStoredApiKey;
     }
 
     private async void CancelBtn_Click(object sender, RoutedEventArgs e)

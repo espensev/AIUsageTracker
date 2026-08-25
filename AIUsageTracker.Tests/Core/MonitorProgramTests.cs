@@ -2,6 +2,8 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
@@ -52,6 +54,66 @@ public sealed class MonitorProgramTests : IDisposable
 
         Assert.EndsWith("AIUsageTracker" + Path.DirectorySeparatorChar + "monitor.json", path, StringComparison.Ordinal);
         Assert.DoesNotContain("AIUsageTracker" + Path.DirectorySeparatorChar + "AIUsageTracker", path, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SaveMonitorInfo_CreatesAndReusesAccessToken()
+    {
+        this.InvokeMonitorProgramMethod(
+            "SaveMonitorInfo",
+            5123,
+            false,
+            NullLogger.Instance,
+            this._pathProvider,
+            "starting");
+        var first = this.DeserializeMonitorInfo(this._pathProvider.GetMonitorInfoFilePath());
+
+        this.InvokeMonitorProgramMethod(
+            "SaveMonitorInfo",
+            5123,
+            false,
+            NullLogger.Instance,
+            this._pathProvider,
+            "running");
+        var second = this.DeserializeMonitorInfo(this._pathProvider.GetMonitorInfoFilePath());
+
+        Assert.NotNull(first.AccessToken);
+        Assert.True(first.AccessToken.Length >= 43);
+        Assert.Equal(first.AccessToken, second.AccessToken);
+    }
+
+    [Fact]
+    public void SaveMonitorInfo_RestrictsTokenMetadataToCurrentWindowsUser()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        this.InvokeMonitorProgramMethod(
+            "SaveMonitorInfo",
+            5123,
+            false,
+            NullLogger.Instance,
+            this._pathProvider,
+            "running");
+
+        var path = this._pathProvider.GetMonitorInfoFilePath();
+        var security = FileSystemAclExtensions.GetAccessControl(new FileInfo(path));
+        using var identity = WindowsIdentity.GetCurrent();
+        var currentUserSid = identity.User;
+        Assert.NotNull(currentUserSid);
+        Assert.True(security.AreAccessRulesProtected);
+        Assert.Equal(currentUserSid, security.GetOwner(typeof(SecurityIdentifier)));
+
+        var rules = security.GetAccessRules(
+            includeExplicit: true,
+            includeInherited: true,
+            targetType: typeof(SecurityIdentifier));
+        Assert.NotEmpty(rules.Cast<FileSystemAccessRule>());
+        Assert.All(
+            rules.Cast<FileSystemAccessRule>(),
+            rule => Assert.Equal(currentUserSid, rule.IdentityReference));
     }
 
     [Fact]

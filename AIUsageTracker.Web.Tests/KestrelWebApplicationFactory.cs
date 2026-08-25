@@ -25,7 +25,7 @@ public sealed class KestrelWebApplicationFactory<TEntryPoint> : IDisposable
     private bool _initialized;
 
     public KestrelWebApplicationFactory()
-        : this(localAppDataRoot: null, ownsLocalAppDataRoot: false, environmentOverrides: null)
+        : this(CreateIsolatedLocalAppDataRoot(), ownsLocalAppDataRoot: true, environmentOverrides: null)
     {
     }
 
@@ -35,7 +35,7 @@ public sealed class KestrelWebApplicationFactory<TEntryPoint> : IDisposable
     }
 
     public KestrelWebApplicationFactory(IReadOnlyDictionary<string, string> environmentOverrides)
-        : this(localAppDataRoot: null, ownsLocalAppDataRoot: false, environmentOverrides)
+        : this(CreateIsolatedLocalAppDataRoot(), ownsLocalAppDataRoot: true, environmentOverrides)
     {
     }
 
@@ -108,6 +108,11 @@ public sealed class KestrelWebApplicationFactory<TEntryPoint> : IDisposable
         return port;
     }
 
+    private static string CreateIsolatedLocalAppDataRoot()
+    {
+        return TestTempPaths.CreateDirectory("aiusagetracker-web-localappdata");
+    }
+
     private void EnsureStarted()
     {
         if (this._initialized)
@@ -157,6 +162,7 @@ public sealed class KestrelWebApplicationFactory<TEntryPoint> : IDisposable
         {
             Directory.CreateDirectory(this._localAppDataRoot);
             startInfo.Environment["LOCALAPPDATA"] = this._localAppDataRoot;
+            startInfo.Environment["AIUSAGETRACKER_LOCAL_APP_DATA_ROOT"] = this._localAppDataRoot;
         }
 
         if (this._environmentOverrides != null)

@@ -19,7 +19,7 @@ internal static class WebStartupServiceExtensions
             options.AddPolicy("DashboardCache", policy =>
             {
                 policy.Expire(TimeSpan.FromSeconds(15));
-                policy.SetVaryByQuery("showUsed", "showInactive");
+                policy.SetVaryByQuery("showUsed", "showInactive", "expAnomaly");
             });
 
             options.AddPolicy("ChartsCache", policy =>

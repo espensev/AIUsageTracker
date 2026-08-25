@@ -254,7 +254,16 @@ public sealed class WebDatabaseServiceTests : IDisposable
                     status_message TEXT DEFAULT '',
                     response_latency_ms REAL DEFAULT 0,
                     next_reset_time TEXT,
-                    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    card_id TEXT,
+                    group_id TEXT,
+                    window_kind INTEGER NOT NULL DEFAULT 0,
+                    model_name TEXT,
+                    name TEXT,
+                    card_type TEXT,
+                    parent_provider_id TEXT,
+                    reset_credits_available INTEGER,
+                    reset_credit_expirations_utc TEXT
                 );
                 CREATE TABLE IF NOT EXISTS raw_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

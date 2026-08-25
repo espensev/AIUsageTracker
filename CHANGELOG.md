@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Grok CLI provider** — surfaces xAI SuperGrok weekly credit usage and on-demand credits. Session auth is auto-discovered from `~/.grok/auth.json` using a wildcard issuer-scoped schema; token is re-read on every refresh because the CLI rotates it every few hours. Missing session renders as "Grok CLI session missing - run grok login".
+- **Wildcard root properties in `ProviderAuthFileSchema`** — a schema `RootProperty` ending in `*` (e.g. `https://auth.x.ai::*`) now matches any root property by prefix, enabling issuer-scoped auth stores whose property names embed a dynamic segment (the OIDC client id). Such property names contain dots and are matched whole instead of being dot-navigated. When multiple roots match (e.g. two client-id entries left by a CLI upgrade), the newest unexpired session wins via the schema's optional created/expiry timestamp properties.
+
+### Security
+
+- **Monitor loopback API secured with bearer auth (contract v2)** — the `/api/*` endpoints now require `Authorization: Bearer <token>` using the ACL-protected access token stored in `monitor.json` (`MonitorInfoPersistence.AclToken`). `/api/health` remains unauthenticated. The API contract version has been bumped from 1 to 2 (`MonitorApiContract.Version`). Provider configuration responses are redacted via the new `ProviderConfigResponse` DTO — `api_key` and other secrets are no longer returned to API consumers. The `/hubs/usage` SignalR hub is authenticated via `Authorization: Bearer <token>` header or `access_token` query parameter.
+
 ## [2.4.6] - 2026-07-27
 
 Stable release consolidating `2.4.6-beta.1` and `2.4.6-beta.2`. Recommended upgrade for all users — most importantly anyone with `IsPrivacyMode=true` was missing `raw_snapshots` writes for the entire duration privacy mode was enabled, and Z.AI users were seeing their weekly GLM quota silently dropped behind a fresh 5h window.
@@ -15,6 +24,20 @@ Stable release consolidating `2.4.6-beta.1` and `2.4.6-beta.2`. Recommended upgr
 
 - **Z.AI provider surfaces the weekly GLM quota** — Z.AI's live API (since 2026-07-24) returns a third limit entry for a 1-week rolling `TOKENS_LIMIT` (`unit=6, number=1`) that the provider was previously silently dropping. The provider now classifies each `TOKENS_LIMIT` window by its `(unit, number)` pair and emits a separate card per window: a 5-hour rolling burst (`5h`) and a 1-week rolling weekly quota (`Weekly`). Each window card carries its own `WindowKind`, `PeriodDuration`, `CardId`, `GroupId`, and `NextResetTime`. The weekly card surfaces what's previously been hidden — your real weekly GLM quota (e.g. at 100% when the 5h window is fresh, the UI no longer falsely shows full quota available).
 - **Z.AI provider uses `QuotaWindowDefinition` declarations** — `ZaiProvider.StaticDefinition` now declares the two `QuotaWindow` entries (5h + Weekly) so the rendering layer can drive card display from declaration rather than parsing the live response shape at runtime.
+
+## [2.4.6-beta.2] - 2026-07-27
+
+### Added
+
+- **Z.AI provider surfaces the weekly GLM quota** — see the consolidated `2.4.6` entry above.
+- **Z.AI provider uses `QuotaWindowDefinition` declarations** — see the consolidated `2.4.6` entry above.
+
+## [2.4.6-beta.1] - 2026-07-23
+
+### Fixed
+
+- **Z.AI provider stops "Temporarily paused" loop on inactive quota windows** — see the consolidated `2.4.6` entry above.
+- **Privacy mode no longer silently disables `raw_snapshots` writes** — see the consolidated `2.4.6` entry above.
 
 ## [2.4.5] - 2026-07-19
 

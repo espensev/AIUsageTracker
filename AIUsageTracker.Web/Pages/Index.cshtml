@@ -36,9 +36,18 @@
         }
 
         @{
-            var visibleUsage = (Model.LatestUsage ?? new List<AIUsageTracker.Core.Models.ProviderUsage>())
+            var allUsage = Model.LatestUsage ?? new List<AIUsageTracker.Core.Models.ProviderUsage>();
+            var visibleUsage = allUsage
                 .Where(u => Model.ShowInactiveProviders || u.IsAvailable)
                 .ToList();
+            var visibleFamilies = IndexModel.ProjectProviderFamilies(visibleUsage);
+            var attentionUsage = Model.ShowInactiveProviders
+                ? new List<AIUsageTracker.Core.Models.ProviderUsage>()
+                : allUsage
+                    .Where(u => !u.IsAvailable)
+                    .GroupBy(u => u.ProviderId, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .ToList();
 
             var currencyProviders = visibleUsage
                 .OfType<QuotaProviderUsage>()
@@ -70,58 +79,30 @@
             </div>
         }
 
-        @if (visibleUsage.Count > 0)
+        @if (attentionUsage.Count > 0)
         {
             <div class="section-header">
-                <h2 class="mb-2">Provider Reliability</h2>
+                <h2 class="mb-2">Needs attention</h2>
             </div>
-            <div class="reliability-grid">
-                @foreach (var usage in visibleUsage)
+            <div class="attention-grid">
+                @foreach (var usage in attentionUsage)
                 {
-                    var hasReliability = Model.ReliabilityByProvider.TryGetValue(usage.ProviderId, out var reliability);
-                    var snapshot = hasReliability && reliability != null
-                        ? reliability
-                        : AIUsageTracker.Core.Models.ProviderReliabilitySnapshot.Unavailable("No history");
-                    var successRate = snapshot.IsAvailable
-                        ? Math.Clamp(100 - snapshot.FailureRatePercent, 0, 100)
-                        : 0;
-                    var failureClass = GetFailureClass(snapshot.FailureRatePercent);
-                    <div class="reliability-card">
-                        <div class="reliability-header">
+                    var attentionLabel = usage.State switch
+                    {
+                        AIUsageTracker.Core.Models.ProviderUsageState.Missing => "Not configured",
+                        AIUsageTracker.Core.Models.ProviderUsageState.Error => "Error",
+                        AIUsageTracker.Core.Models.ProviderUsageState.ConsoleCheck => "Check console",
+                        AIUsageTracker.Core.Models.ProviderUsageState.Unknown => "Unknown",
+                        AIUsageTracker.Core.Models.ProviderUsageState.Expired => "Expired",
+                        _ => "Unavailable",
+                    };
+                    <div class="attention-card">
+                        <div class="provider-header">
                             <span class="provider-name">@usage.ProviderName</span>
-                            <span class="reliability-badge @GetReliabilityClass(snapshot)">
-                                @GetReliabilityLabel(snapshot)
-                            </span>
+                            <span class="provider-status inactive">@attentionLabel</span>
                         </div>
-                        @if (snapshot.IsAvailable)
-                        {
-                            <div class="reliability-metric">
-                                <div class="reliability-row">
-                                    <span>Success Rate</span>
-                                    <span>@successRate.ToString("F1")%</span>
-                                </div>
-                                <div class="reliability-progress">
-                                    <div class="reliability-progress-bar success" style="width: @successRate%"></div>
-                                </div>
-                            </div>
-                            <div class="reliability-metric">
-                                <div class="reliability-row">
-                                    <span>Failure Rate</span>
-                                    <span>@snapshot.FailureRatePercent.ToString("F1")%</span>
-                                </div>
-                                <div class="reliability-progress">
-                                    <div class="reliability-progress-bar @failureClass" style="width: @snapshot.FailureRatePercent%"></div>
-                                </div>
-                            </div>
-                        }
-                        <div class="reliability-row">
-                            <span>Avg Latency</span>
-                            <span>@GetLatencyText(snapshot)</span>
-                        </div>
-                        <div class="reliability-row">
-                            <span>Last Success</span>
-                            <span>@GetLastSuccessText(snapshot)</span>
-                        </div>
+                        <p class="attention-detail">@(string.IsNullOrWhiteSpace(usage.Description) ? "Provider is not returning usage." : usage.Description)</p>
+                        <a href="/provider/@usage.ProviderId" class="btn btn-secondary btn-sm">Inspect</a>
                     </div>
                 }
             </div>
@@ -144,7 +125,7 @@
                 </div>
             </div>
 
-        @if (visibleUsage.Count == 0)
+        @if (visibleFamilies.Count == 0)
         {
             <div class="alert alert-info">
                 @(Model.ShowInactiveProviders
@@ -155,14 +136,14 @@
         else
         {
             <div class="provider-grid">
-                @foreach (var usage in visibleUsage)
+                @foreach (var family in visibleFamilies)
                 {
+                    var usage = family.PrimaryCard;
                     var qUsage = usage as QuotaProviderUsage;
-                    var wUsage = usage as WindowedProviderUsage;
                     var isStatusOnly = qUsage?.IsStatusOnly ?? false;
                     var hasUsableMetrics = usage.IsAvailable && !isStatusOnly;
-                    var hasForecast = Model.ForecastsByProvider.TryGetValue(usage.ProviderId, out var forecast);
-                    var hasAnomaly = Model.AnomaliesByProvider.TryGetValue(usage.ProviderId, out var anomalySnapshot);
+                    var hasForecast = Model.ForecastsByProvider.TryGetValue(family.ProviderId, out var forecast);
+                    var hasAnomaly = Model.AnomaliesByProvider.TryGetValue(family.ProviderId, out var anomalySnapshot);
                     var anomaly = hasAnomaly && anomalySnapshot != null
                         ? anomalySnapshot
                         : AIUsageTracker.Core.Models.UsageAnomalySnapshot.Unavailable("Insufficient history");
@@ -207,7 +188,7 @@
                         }
                     }
                     
-                    <div class="provider-card">
+                    <div class="provider-card" data-provider-id="@family.ProviderId" data-card-id="@qUsage?.CardId">
                         <div class="provider-header">
                             <span class="provider-name">@usage.ProviderName</span>
                             <span class="provider-status @(usage.IsAvailable ? "active" : "inactive")">
@@ -255,6 +236,10 @@
                                 }
                                 else
                                 {
+                                    @if (!string.IsNullOrWhiteSpace(qUsage?.Name))
+                                    {
+                                        <span class="progress-text-label">@qUsage.Name</span>
+                                    }
                                     <span>@usageText</span>
                                     <span>@usage.Description</span>
                                 }
@@ -279,7 +264,7 @@
                             }
                         </div>
                         
-                        @if (hasUsableMetrics && Model.SparklineData.TryGetValue(usage.ProviderId, out var sparkPoints) && sparkPoints.Count > 1)
+                        @if (hasUsableMetrics && Model.SparklineData.TryGetValue(family.ProviderId, out var sparkPoints) && sparkPoints.Count > 1)
                         {
                             var w = 100.0;
                             var h = 24.0;
@@ -291,27 +276,19 @@
                         }
                         
                         @{
-                            // For flat-card providers, show sibling cards in the same group as sub-rows.
-                            var siblingCards = !string.IsNullOrEmpty(wUsage?.GroupId) && wUsage?.CardId != null
-                                ? (Model.LatestUsage ?? new List<AIUsageTracker.Core.Models.ProviderUsage>())
-                                    .Where(u => u is WindowedProviderUsage w2
-                                        && string.Equals(w2.GroupId, wUsage.GroupId, StringComparison.OrdinalIgnoreCase)
-                                        && !string.Equals(w2.CardId, wUsage.CardId, StringComparison.OrdinalIgnoreCase))
-                                    .ToList()
-                                : new List<AIUsageTracker.Core.Models.ProviderUsage>();
+                            var siblingCards = family.SiblingCards;
                         }
                         @if (siblingCards.Count > 0)
                         {
                             <div class="sub-providers-container">
-                                <button class="sub-providers-toggle" onclick="toggleSubProviders('@wUsage?.GroupId')">
-                                    <span id="toggle-icon-@(wUsage?.GroupId)">▼</span>
-                                    <span id="toggle-text-@(wUsage?.GroupId)">Hide @(siblingCards.Count) cards</span>
+                                <button class="sub-providers-toggle" onclick="toggleSubProviders('@family.ProviderId')">
+                                    <span id="toggle-icon-@(family.ProviderId)">▼</span>
+                                    <span id="toggle-text-@(family.ProviderId)">Hide @(siblingCards.Count) cards</span>
                                 </button>
-                                <div id="sub-providers-@(wUsage?.GroupId)" class="sub-providers">
+                                <div id="sub-providers-@(family.ProviderId)" class="sub-providers">
                                     @foreach (var sibling in siblingCards)
                                     {
                                         var sibQuota = sibling as QuotaProviderUsage;
-                                        var sibWindow = sibling as WindowedProviderUsage;
                                         var showUsed = Model.ShowUsedPercentage;
                                         var sibUsedPct = sibQuota?.UsedPercent ?? 0;
                                         var sibRemPct = sibQuota?.RemainingPercent ?? 0;
@@ -320,7 +297,7 @@
                                             : sibRemPct.ToString("F0") + "% remaining";
 
                                         <div class="sub-provider-row">
-                                            <span class="sub-provider-name">@(sibWindow?.Name ?? sibWindow?.CardId)</span>
+                                            <span class="sub-provider-name">@(sibQuota?.Name ?? sibQuota?.CardId)</span>
                                             <span class="sub-provider-value">@displayVal</span>
                                             @if (sibQuota?.NextResetTime is DateTime sibNextReset)
                                             {
@@ -333,7 +310,65 @@
                         }
                         
                         <div class="mt-2">
-                            <a href="/provider/@usage.ProviderId" class="btn btn-secondary btn-sm">View Details</a>
+                            <a href="/provider/@family.ProviderId" class="btn btn-secondary btn-sm">View Details</a>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (visibleFamilies.Count > 0)
+        {
+            <div class="section-header">
+                <h2 class="mb-2">Provider Reliability</h2>
+            </div>
+            <div class="reliability-grid">
+                @foreach (var family in visibleFamilies)
+                {
+                    var usage = family.PrimaryCard;
+                    var hasReliability = Model.ReliabilityByProvider.TryGetValue(family.ProviderId, out var reliability);
+                    var snapshot = hasReliability && reliability != null
+                        ? reliability
+                        : AIUsageTracker.Core.Models.ProviderReliabilitySnapshot.Unavailable("No history");
+                    var successRate = snapshot.IsAvailable
+                        ? Math.Clamp(100 - snapshot.FailureRatePercent, 0, 100)
+                        : 0;
+                    var failureClass = GetFailureClass(snapshot.FailureRatePercent);
+                    <div class="reliability-card">
+                        <div class="reliability-header">
+                            <span class="provider-name">@usage.ProviderName</span>
+                            <span class="reliability-badge @GetReliabilityClass(snapshot)">
+                                @GetReliabilityLabel(snapshot)
+                            </span>
+                        </div>
+                        @if (snapshot.IsAvailable)
+                        {
+                            <div class="reliability-metric">
+                                <div class="reliability-row">
+                                    <span>Success Rate</span>
+                                    <span>@successRate.ToString("F1")%</span>
+                                </div>
+                                <div class="reliability-progress">
+                                    <div class="reliability-progress-bar success" style="width: @successRate%"></div>
+                                </div>
+                            </div>
+                            <div class="reliability-metric">
+                                <div class="reliability-row">
+                                    <span>Failure Rate</span>
+                                    <span>@snapshot.FailureRatePercent.ToString("F1")%</span>
+                                </div>
+                                <div class="reliability-progress">
+                                    <div class="reliability-progress-bar @failureClass" style="width: @snapshot.FailureRatePercent%"></div>
+                                </div>
+                            </div>
+                        }
+                        <div class="reliability-row">
+                            <span>Avg Latency</span>
+                            <span>@GetLatencyText(snapshot)</span>
+                        </div>
+                        <div class="reliability-row">
+                            <span>Last Success</span>
+                            <span>@GetLastSuccessText(snapshot)</span>
                         </div>
                     </div>
                 }
