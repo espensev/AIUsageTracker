@@ -1,6 +1,6 @@
 # <img src="AIUsageTracker.Web/wwwroot/favicon.png" width="32" height="32" valign="middle"> AI Usage Tracker
 
-![Version](https://img.shields.io/badge/version-2.4.6--beta.2-orange)
+![Version](https://img.shields.io/badge/version-2.4.6-green)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20|%20Linux%20-blue)
 ![Language](https://img.shields.io/badge/language-C%23%20|%20.NET-purple)
@@ -35,6 +35,7 @@ Download the latest installer or .zip file from the [Release](https://github.com
 
 ## Key Features
 
+- **OpenAI resets and expiration dates**: Hover over the OpenAI quota bar and quickly see the resets and their expiration dates 
 - **Multi-Provider Support**: Track usage for Anthropic, Gemini, OpenRouter, OpenCode, Kilo Code, DeepSeek, OpenAI, GitHub Copilot, Codex, Mistral, and more.
 - **Smart Discovery**: Automatically scans environment variables, Claude Code credentials, and standard configuration files for existing API keys.
 - **Auto-Updates**: Notifies you of new releases directly in the dashboard with a one-click download link.

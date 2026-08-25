@@ -11,19 +11,52 @@
 
 - **Monitor loopback API secured with bearer auth (contract v2)** — the `/api/*` endpoints now require `Authorization: Bearer <token>` using the ACL-protected access token stored in `monitor.json` (`MonitorInfoPersistence.AclToken`). `/api/health` remains unauthenticated. The API contract version has been bumped from 1 to 2 (`MonitorApiContract.Version`). Provider configuration responses are redacted via the new `ProviderConfigResponse` DTO — `api_key` and other secrets are no longer returned to API consumers. The `/hubs/usage` SignalR hub is authenticated via `Authorization: Bearer <token>` header or `access_token` query parameter.
 
-## [2.4.6-beta.2] - 2026-07-27
+## [2.4.6] - 2026-07-27
+
+Stable release consolidating `2.4.6-beta.1` and `2.4.6-beta.2`. Recommended upgrade for all users — most importantly anyone with `IsPrivacyMode=true` was missing `raw_snapshots` writes for the entire duration privacy mode was enabled, and Z.AI users were seeing their weekly GLM quota silently dropped behind a fresh 5h window.
+
+### Fixed
+
+- **Z.AI provider stops "Temporarily paused" loop on inactive quota windows** — when the Z.AI API returns HTTP 200 with `{"code":200,"msg":"Operation successful","data":{},"success":true}` (no active 5-hour rolling window yet), the provider now surfaces a successful "Quota window inactive (5h rolling)" card instead of opening the circuit breaker after 15 empty-data failures.
+- **Privacy mode no longer silently disables `raw_snapshots` writes** — the audit trail of provider response bodies is now stored continuously regardless of the UI privacy setting. Privacy mode is documented in `AGENTS.md` as UI-only (it redacts `AccountName` and `ConfigKey` for display, but never suppresses database recording). Previously, any user with `IsPrivacyMode=true` had a complete snapshot gap for the entire duration privacy mode was enabled (e.g. a 4-day gap with zero snapshots for any provider).
 
 ### Added
 
 - **Z.AI provider surfaces the weekly GLM quota** — Z.AI's live API (since 2026-07-24) returns a third limit entry for a 1-week rolling `TOKENS_LIMIT` (`unit=6, number=1`) that the provider was previously silently dropping. The provider now classifies each `TOKENS_LIMIT` window by its `(unit, number)` pair and emits a separate card per window: a 5-hour rolling burst (`5h`) and a 1-week rolling weekly quota (`Weekly`). Each window card carries its own `WindowKind`, `PeriodDuration`, `CardId`, `GroupId`, and `NextResetTime`. The weekly card surfaces what's previously been hidden — your real weekly GLM quota (e.g. at 100% when the 5h window is fresh, the UI no longer falsely shows full quota available).
 - **Z.AI provider uses `QuotaWindowDefinition` declarations** — `ZaiProvider.StaticDefinition` now declares the two `QuotaWindow` entries (5h + Weekly) so the rendering layer can drive card display from declaration rather than parsing the live response shape at runtime.
 
+## [2.4.6-beta.2] - 2026-07-27
+
+### Added
+
+- **Z.AI provider surfaces the weekly GLM quota** — see the consolidated `2.4.6` entry above.
+- **Z.AI provider uses `QuotaWindowDefinition` declarations** — see the consolidated `2.4.6` entry above.
+
 ## [2.4.6-beta.1] - 2026-07-23
 
 ### Fixed
 
-- **Z.AI provider stops "Temporarily paused" loop on inactive quota windows** — when the Z.AI API returns HTTP 200 with `{"code":200,"msg":"Operation successful","data":{},"success":true}` (no active 5-hour rolling window yet), the provider now surfaces a successful "Quota window inactive (5h rolling)" card instead of opening the circuit breaker after 15 empty-data failures.
-- **Privacy mode no longer silently disables `raw_snapshots` writes** — the audit trail of provider response bodies is now stored continuously regardless of the UI privacy setting. Privacy mode is documented in `AGENTS.md` as UI-only (it redacts `AccountName` and `ConfigKey` for display, but never suppresses database recording). Previously, any user with `IsPrivacyMode=true` had a complete snapshot gap for the entire duration privacy mode was enabled (e.g. a 4-day gap with zero snapshots for any provider).
+- **Z.AI provider stops "Temporarily paused" loop on inactive quota windows** — see the consolidated `2.4.6` entry above.
+- **Privacy mode no longer silently disables `raw_snapshots` writes** — see the consolidated `2.4.6` entry above.
+
+## [2.4.5] - 2026-07-19
+
+### Added
+
+- **OpenAI reset-credit expiration dates in the usage tooltip** — hover over the OpenAI (Codex) usage card to see every available reset credit's expiration, ordered soonest-first and displayed in local date and time with a relative countdown.
+
+### Fixed
+
+- **Reset-credit expirations now survive the complete application pipeline** — dates from OpenAI's reset-credit detail endpoint are preserved through Monitor processing, SQLite history, grouped API serialization, and desktop tooltip rendering, including after refresh or restart.
+
+### Security
+
+- **Updated the SQLite dependency chain** — `Microsoft.Data.Sqlite` is now `10.0.10`, with the native SQLite bundle pinned to `2.1.12`, removing the resolved dependency affected by high-severity advisory `CVE-2025-6965`.
+
+### Changed
+
+- **Added a changed-file analyzer gate and current cleanup work packages** — new C# commits are checked for formatting and analyzer regressions before the Release build and core test gates run.
+- **Removed redundant framework package references** — .NET framework assemblies now provide JSON, hosting, HTTP, and drawing APIs without duplicate direct package references.
 
 ## [2.4.5-beta.5] - 2026-07-19
 
