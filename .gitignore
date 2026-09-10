@@ -517,3 +517,6 @@ build-hib.err
 
 # Local build/merge diagnostics
 *.err
+
+# Remember plugin migration marker (session memory lives outside the repo)
+.remember/
