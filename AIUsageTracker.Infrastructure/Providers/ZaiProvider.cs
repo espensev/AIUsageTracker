@@ -490,7 +490,7 @@ public class ZaiProvider : ProviderBase
             ? $"{((int)tokenWindowDuration.Value.TotalHours).ToString(CultureInfo.InvariantCulture)}h window"
             : null;
 
-        if (tokenLimit != null && tokenLimit.Percentage > 0 && tokenLimit.NextResetTime.HasValue && tokenLimit.NextResetTime.Value > 0)
+        if (tokenLimit?.NextResetTime.HasValue == true && tokenLimit.NextResetTime.Value > 0)
         {
             var ts = tokenLimit.NextResetTime.Value;
             this._logger.LogDebug("[ZAI] Active token window reset timestamp: {Ts}", ts);

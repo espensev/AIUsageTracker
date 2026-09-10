@@ -288,6 +288,29 @@ public sealed class MainWindowRuntimeLogicTests
     }
 
     [Fact]
+    public void BuildTooltipContent_ZaiFreshFiveHourWindow_IncludesItsResetLine()
+    {
+        var reset = new DateTime(2026, 4, 18, 10, 30, 0, DateTimeKind.Utc);
+        var usage = new ModelScopedProviderUsage
+        {
+            ProviderId = "zai-coding-plan",
+            ProviderName = "5h",
+            ModelName = "5h",
+            CardId = "5h",
+            IsAvailable = true,
+            IsQuotaBased = true,
+            PlanType = PlanType.Coding,
+            UsedPercent = 0,
+            NextResetTime = reset,
+        };
+
+        var tooltip = MainWindowRuntimeLogic.BuildTooltipContent(usage, usage.ProviderName!, useRelativeResetTime: false);
+
+        Assert.NotNull(tooltip);
+        Assert.Contains($"5h resets: {UsageMath.FormatAbsoluteDate(reset)}", tooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildTooltipContent_WithSingleCopilotReset_IncludesGenericResetLine()
     {
         var reset = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
