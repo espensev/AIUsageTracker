@@ -394,6 +394,33 @@ public sealed class UsageDatabaseReadTests : IDisposable
         Assert.Equal(15.0, ((QuotaProviderUsage)codexRows[1]).RequestsUsed); // second newest
     }
 
+    [Fact]
+    public async Task GetRecentHistoryAsync_ReturnsRowsPerProviderCardAsync()
+    {
+        var db = await this.CreateDatabaseAsync();
+        var baseTime = DateTime.UtcNow.AddMinutes(-30);
+
+        await db.StoreHistoryAsync([
+            MakeUsage("zai-coding-plan", requestsUsed: 90, fetchedAt: baseTime, cardId: "5h"),
+            MakeUsage("zai-coding-plan", requestsUsed: 10, fetchedAt: baseTime, cardId: "weekly"),
+        ]);
+        await db.StoreHistoryAsync([
+            MakeUsage("zai-coding-plan", requestsUsed: 5, fetchedAt: baseTime.AddMinutes(5), cardId: "5h"),
+            MakeUsage("zai-coding-plan", requestsUsed: 20, fetchedAt: baseTime.AddMinutes(5), cardId: "weekly"),
+        ]);
+
+        var results = await db.GetRecentHistoryAsync(countPerProvider: 2);
+
+        var fiveHourRows = results.OfType<QuotaProviderUsage>()
+            .Where(row => string.Equals(row.CardId, "5h", StringComparison.Ordinal))
+            .ToList();
+        var weeklyRows = results.OfType<QuotaProviderUsage>()
+            .Where(row => string.Equals(row.CardId, "weekly", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, fiveHourRows.Count);
+        Assert.Equal(2, weeklyRows.Count);
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -413,7 +440,8 @@ public sealed class UsageDatabaseReadTests : IDisposable
         bool isAvailable = true,
         string statusMessage = "ok",
         int httpStatus = 200,
-        DateTime fetchedAt = default)
+        DateTime fetchedAt = default,
+        string? cardId = null)
     {
         return new WindowedProviderUsage
         {
@@ -426,6 +454,7 @@ public sealed class UsageDatabaseReadTests : IDisposable
             Description = statusMessage,
             HttpStatus = httpStatus,
             FetchedAt = fetchedAt == default ? DateTime.UtcNow : fetchedAt,
+            CardId = cardId,
         };
     }
 

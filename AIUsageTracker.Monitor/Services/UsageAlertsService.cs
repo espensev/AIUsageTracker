@@ -85,14 +85,14 @@ public class UsageAlertsService
 
         var allHistory = await this._database.GetRecentHistoryAsync(2).ConfigureAwait(false);
         var historyMap = allHistory
-            .GroupBy(h => h.ProviderId, StringComparer.Ordinal)
+            .GroupBy(GetHistoryKey, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
         foreach (var usage in currentUsages)
         {
             try
             {
-                if (!historyMap.TryGetValue(usage.ProviderId, out var history) || history.Count < 2)
+                if (!historyMap.TryGetValue(GetHistoryKey(usage), out var history) || history.Count < 2)
                 {
                     this.LogInsufficientHistory(usage);
                     continue;
@@ -124,6 +124,12 @@ public class UsageAlertsService
                 this._logger.LogWarning(ex, "Reset check failed for {ProviderId}: {Message}", usage.ProviderId, ex.Message);
             }
         }
+    }
+
+    private static string GetHistoryKey(ProviderUsage usage)
+    {
+        var cardId = usage is QuotaProviderUsage quota ? quota.CardId : null;
+        return $"{usage.ProviderId}\u001F{cardId ?? string.Empty}";
     }
 
     private static double GetEffectiveAlertPercent(QuotaProviderUsage usage, double rawUsedPercent)

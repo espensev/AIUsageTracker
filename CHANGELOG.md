@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.4.7-beta.1] - 2026-09-10
+
+### Fixed
+
+- **Z.AI quota resets are detected per window** — the 5-hour and weekly Coding Plan quotas now retain independent history, so a weekly reset is recorded and notified correctly without being mixed with the 5-hour rolling window.
+
 ## [2.4.6-beta.2] - 2026-07-27
 
 ### Added
