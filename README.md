@@ -1,6 +1,6 @@
 # <img src="AIUsageTracker.Web/wwwroot/favicon.png" width="32" height="32" valign="middle"> AI Usage Tracker
 
-![Version](https://img.shields.io/badge/version-2.4.6-green)
+![Version](https://img.shields.io/badge/version-2.4.7-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Language](https://img.shields.io/badge/language-C%23%20|%20.NET-purple)
 [![](https://dcbadge.limes.pink/api/server/AZtNQtWuJA?style=flat)](https://discord.gg/AZtNQtWuJA)
