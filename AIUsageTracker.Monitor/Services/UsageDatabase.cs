@@ -995,14 +995,21 @@ public class UsageDatabase : IUsageDatabase
                            h.http_status AS HttpStatus,
                            COALESCE(h.upstream_response_validity, 0) AS UpstreamResponseValidity,
                            COALESCE(h.upstream_response_note, '') AS UpstreamResponseNote,
+                           h.card_id AS CardId,
+                           h.group_id AS GroupId,
+                           h.window_kind AS WindowKind,
+                           h.name AS Name,
                            COALESCE(h.card_type, 'quota') AS CardType,
-                           ROW_NUMBER() OVER (PARTITION BY h.provider_id ORDER BY h.fetched_at DESC) as pos
+                           ROW_NUMBER() OVER (
+                               PARTITION BY h.provider_id, COALESCE(h.card_id, '')
+                               ORDER BY h.fetched_at DESC) as pos
                     FROM provider_history h
                     JOIN providers p ON h.provider_id = p.provider_id
                 )
                 SELECT ProviderId, ProviderName, RequestsUsed, RequestsAvailable,
                        UsedPercent, IsAvailable, Description, FetchedAt, NextResetTime,
-                       ResponseLatencyMs, HttpStatus, UpstreamResponseValidity, UpstreamResponseNote, CardType
+                       ResponseLatencyMs, HttpStatus, UpstreamResponseValidity, UpstreamResponseNote,
+                       CardId, GroupId, WindowKind, Name, CardType
                 FROM RankedHistory
                 WHERE pos <= @Count
                 ORDER BY ProviderId, FetchedAt DESC";
