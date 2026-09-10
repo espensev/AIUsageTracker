@@ -1,6 +1,6 @@
 # <img src="AIUsageTracker.Web/wwwroot/favicon.png" width="32" height="32" valign="middle"> AI Usage Tracker
 
-![Version](https://img.shields.io/badge/version-2.4.6--beta.2-orange)
+![Version](https://img.shields.io/badge/version-2.4.7--beta.1-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20|%20Linux%20-blue)
 ![Language](https://img.shields.io/badge/language-C%23%20|%20.NET-purple)
@@ -73,7 +73,7 @@ Download the latest installer or .zip file from the [Release](https://github.com
 | **Opencode Zen** (coding plan)   | API Key¹            | ⚠️ Beta             | Testers welcome                                              |
 | **Opencode Zen** (pay-as-you-go) | API Key¹            | ✅ Tested            |                                                              |
 | **Synthetic**                    | API Key¹            | ✅ Tested            |                                                              |
-| **Z.AI** (Coding Plan)           | API Key¹            | ✅ Tested            |                                                              |
+| **Z.AI** (Coding Plan)           | API Key¹            | ✅ Tested            | Independent 5-hour and weekly quota reset tracking           |
 
 ¹ API Key can be either entered directly or discovered automatically via opencode configuration  
 
