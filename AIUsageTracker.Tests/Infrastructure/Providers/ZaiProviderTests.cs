@@ -150,11 +150,10 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
     }
 
     [Fact]
-    public async Task GetUsageAsync_FreshTokenLimit_ShowsWindowLabelNotBillingPeriodDateAsync()
+    public async Task GetUsageAsync_FreshTokenLimit_PreservesApiResetTimeForTooltipAsync()
     {
-        // Regression: when percentage=0 (fresh/unused), the API returns the billing period end
-        // date as nextResetTime (e.g. Mar 23), not the 5h rolling window close. The fix uses
-        // unit/number to show "5h window" label instead of a misleading 7-day countdown.
+        // A fresh window can still include a reset timestamp. Keep it so the card tooltip
+        // exposes the API-provided reset instead of hiding it until some quota is consumed.
         var billingPeriodEnd = DateTimeOffset.UtcNow.AddDays(8).ToUnixTimeMilliseconds();
 
         var responseContent = JsonSerializer.Serialize(new
@@ -185,13 +184,8 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
 
         var usage = result.OfType<QuotaProviderUsage>().Single();
         Assert.True(usage.IsAvailable);
-        Assert.Contains("5h window", usage.Description, StringComparison.Ordinal);
-
-        // Must NOT contain a date string that looks like the billing period (many days away)
-        Assert.DoesNotContain("Resets:", usage.Description, StringComparison.Ordinal);
-
-        // nextResetTime should be null — no active window to point at
-        Assert.Null(usage.NextResetTime);
+        Assert.Contains("Resets:", usage.Description, StringComparison.Ordinal);
+        Assert.NotNull(usage.NextResetTime);
     }
 
     [Fact]
@@ -349,8 +343,9 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
         // The weekly card matters: when GLM weekly hits 100%, the user genuinely has
         // no quota left for the rest of the week — the UI must surface that.
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var weeklyResetMs = nowMs + 7L * 24 * 3600 * 1000;
-        var monthlyResetMs = nowMs + 30L * 24 * 3600 * 1000;
+        var fiveHourResetMs = nowMs + ((5L * 3600) * 1000);
+        var weeklyResetMs = nowMs + (((7L * 24) * 3600) * 1000);
+        var monthlyResetMs = nowMs + (((30L * 24) * 3600) * 1000);
 
         var responseContent = JsonSerializer.Serialize(new
         {
@@ -364,6 +359,7 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
                         unit = 3,
                         number = 5L,
                         percentage = 0.0,
+                        nextResetTime = fiveHourResetMs,
                     },
                     new
                     {
@@ -413,6 +409,7 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
         Assert.Equal(TimeSpan.FromHours(5), fiveHour.PeriodDuration);
         Assert.Equal("5h", fiveHour.CardId);
         Assert.True(fiveHour.IsAvailable);
+        Assert.NotNull(fiveHour.NextResetTime);
 
         // Weekly card: 100% used at the live API — must be surfaced, not silently dropped
         var weekly = cards.Single(c => string.Equals(c.ProviderId, "zai-coding-plan", StringComparison.Ordinal) && string.Equals(c.Name, "Weekly", StringComparison.Ordinal));
