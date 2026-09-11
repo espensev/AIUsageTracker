@@ -60,6 +60,58 @@ public class ZaiProviderTests : HttpProviderTestBase<ZaiProvider>
     }
 
     [Fact]
+    public async Task GetUsageAsync_ZcodeResetCards_AttachesEachWindowCountAndExpiryAsync()
+    {
+        var credentials = new ZaiProvider.ZaiResetCredentials("Bearer zcode-token", "zai-oauth-token");
+        var provider = new ZaiProvider(this.HttpClient, this.Logger.Object, () => credentials);
+        var now = DateTimeOffset.UtcNow;
+        var fiveHourExpiry = now.AddHours(2).ToUnixTimeSeconds();
+        var weeklyExpiry = now.AddHours(4).ToUnixTimeSeconds();
+
+        this.SetupHttpResponse("https://api.z.ai/api/monitor/usage/quota/limit", new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                data = new
+                {
+                    limits = new object[]
+                    {
+                        new { type = "TOKENS_LIMIT", unit = 3, number = 5, percentage = 10.0 },
+                        new { type = "TOKENS_LIMIT", unit = 6, number = 1, percentage = 20.0 },
+                    },
+                },
+            })),
+        });
+        this.SetupHttpResponse(
+            request => string.Equals(request.RequestUri?.ToString(), "https://zcode.z.ai/api/v1/coding-plan/reset/status", StringComparison.Ordinal) &&
+                       string.Equals(request.Headers.Authorization?.ToString(), "Bearer zcode-token", StringComparison.Ordinal) &&
+                       string.Equals(request.Headers.GetValues("X-Bigmodel-Authorization").Single(), "zai-oauth-token", StringComparison.Ordinal) &&
+                       string.Equals(request.Headers.GetValues("Bigmodel-Target-Type").Single(), "PERSONAL", StringComparison.Ordinal),
+            new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    available_five_hour_resets = new[] { new { expire_at = fiveHourExpiry } },
+                    available_week_resets = new[] { new { expire_at = weeklyExpiry }, new { expire_at = weeklyExpiry + 60 } },
+                    latest_five_hour_reset_history = (object?)null,
+                    latest_week_reset_history = (object?)null,
+                    has_unread_history = false,
+                })),
+            });
+
+        var cards = (await provider.GetUsageAsync(this.Config)).OfType<QuotaProviderUsage>().ToList();
+        var fiveHour = Assert.Single(cards, card => string.Equals(card.CardId, "5h", StringComparison.Ordinal));
+        var weekly = Assert.Single(cards, card => string.Equals(card.CardId, "weekly", StringComparison.Ordinal));
+
+        Assert.Equal(1, fiveHour.ResetCreditsAvailable);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(fiveHourExpiry).UtcDateTime, Assert.Single(fiveHour.ResetCreditExpirationsUtc!));
+        Assert.Equal(2, weekly.ResetCreditsAvailable);
+        Assert.Equal(2, weekly.ResetCreditExpirationsUtc!.Count);
+    }
+
+    [Fact]
     public async Task GetUsageAsync_NullTotalValue_ReturnsUnavailableAsync()
     {
         // Arrange

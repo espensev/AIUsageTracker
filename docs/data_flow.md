@@ -42,6 +42,10 @@ Provider-specific fallback coverage (metadata-enforced):
 - `github-copilot`: external auth state via GitHub auth files/service.
 - `antigravity`, `opencode-zen`: local runtime providers (process/CLI based, no API-key fallback chain).
 
+### Z.ai Coding Plan Reset Cards
+
+For an installed, signed-in ZCode client, the Z.ai Coding Plan provider also reads the separate reset-card status. It discovers the local ZCode credentials at `%USERPROFILE%\.zcode\v2\credentials.json`; `ZCODE_JWT_TOKEN` and `ZAI_OAUTH_ACCESS_TOKEN` can be supplied together when the local credentials are unavailable. The reset-card lookup is read-only: it reports available 5-hour and weekly cards and their expiries, and never uses a card. If no current ZCode credentials are available, ordinary Z.ai quota tracking continues without reset-card details.
+
 ## Gemini CLI Auth Flow
 
 `gemini-cli` supports two local auth sources, in this strict order:
