@@ -123,6 +123,11 @@ public sealed class ProviderDefinition : IEquatable<ProviderDefinition>
 
     public IReadOnlyList<QuotaWindowDefinition> QuotaWindows { get; init; } = Array.Empty<QuotaWindowDefinition>();
 
+    /// <summary>
+    /// Gets a value indicating whether reset credits are independently issued for each quota window.
+    /// </summary>
+    public bool UsesWindowScopedResetCredits { get; init; }
+
     // Computed lazily: ProviderId + AdditionalHandledProviderIds
     private HashSet<string> HandledProviderIdsSet => this._handledProviderIdsSet ??=
         new HashSet<string>(this.AdditionalHandledProviderIds.Prepend(this.ProviderId), StringComparer.OrdinalIgnoreCase);

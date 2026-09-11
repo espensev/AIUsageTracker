@@ -14,14 +14,25 @@ namespace AIUsageTracker.Infrastructure.Providers;
 public class ZaiProvider : ProviderBase
 {
     private const string QuotaLimitEndpoint = "https://api.z.ai/api/monitor/usage/quota/limit";
+    private const string CodingPlanResetStatusEndpoint = "https://zcode.z.ai/api/v1/coding-plan/reset/status";
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<ZaiProvider> _logger;
+    private readonly Func<ZaiResetCredentials?> _resetCredentialsResolver;
 
     public ZaiProvider(HttpClient httpClient, ILogger<ZaiProvider> logger)
+        : this(httpClient, logger, ZaiResetCredentials.TryLoad)
+    {
+    }
+
+    internal ZaiProvider(
+        HttpClient httpClient,
+        ILogger<ZaiProvider> logger,
+        Func<ZaiResetCredentials?> resetCredentialsResolver)
     {
         this._httpClient = httpClient;
         this._logger = logger;
+        this._resetCredentialsResolver = resetCredentialsResolver;
     }
 
     public static ProviderDefinition StaticDefinition { get; } = new(
@@ -40,6 +51,7 @@ public class ZaiProvider : ProviderBase
         IconAssetName = "zai",
         BadgeColorHex = "#20B2AA",
         BadgeInitial = "Z",
+        UsesWindowScopedResetCredits = true,
         QuotaWindows = new QuotaWindowDefinition[]
         {
             new(WindowKind.Burst,   "5h",     PeriodDuration: TimeSpan.FromHours(5), CardId: "5h"),
@@ -106,6 +118,7 @@ public class ZaiProvider : ProviderBase
         }
 
         var results = new List<ProviderUsage>();
+        var resetStatus = await this.GetCodingPlanResetStatusAsync(cancellationToken).ConfigureAwait(false);
 
         // Process each distinct TOKENS_LIMIT window. As of 2026-07-27 the live API
         // returns up to two token windows: a 5-hour rolling (unit=3, number=5) and
@@ -136,7 +149,8 @@ public class ZaiProvider : ProviderBase
                     httpStatus,
                     window,
                     nextReset,
-                    resetStr));
+                    resetStr,
+                    resetStatus));
             }
             else
             {
@@ -277,7 +291,8 @@ public class ZaiProvider : ProviderBase
         int httpStatus,
         TokenWindowClassification window,
         DateTime? nextResetTime,
-        string resetStr)
+        string resetStr,
+        ZaiResetStatus? resetStatus)
     {
         var label = ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId);
         var finalRemainingPercent = Math.Min(tokenResult.RemainingPercent!.Value, 100);
@@ -332,10 +347,51 @@ public class ZaiProvider : ProviderBase
             Name = window.Label,
             Description = finalDescription,
             NextResetTime = nextResetTime,
+            ResetCreditsAvailable = resetStatus?.GetAvailableCount(window.CardId),
+            ResetCreditExpirationsUtc = resetStatus?.GetExpirations(window.CardId),
             IsAvailable = true,
             RawJson = responseString,
             HttpStatus = httpStatus,
         };
+    }
+
+    private async Task<ZaiResetStatus?> GetCodingPlanResetStatusAsync(CancellationToken cancellationToken)
+    {
+        var credentials = this._resetCredentialsResolver();
+        if (credentials == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, CodingPlanResetStatusEndpoint);
+            request.Headers.TryAddWithoutValidation("Authorization", credentials.ZcodeAuthorization);
+            request.Headers.TryAddWithoutValidation("X-Bigmodel-Authorization", credentials.CodingPlanAuthorization);
+            request.Headers.TryAddWithoutValidation("Bigmodel-Target-Type", "PERSONAL");
+
+            using var response = await this._httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                this._logger.LogDebug("Z.ai reset-card status lookup returned HTTP {StatusCode}", (int)response.StatusCode);
+                return null;
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var payload = await JsonSerializer.DeserializeAsync<ZaiResetStatusResponse>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (payload == null)
+            {
+                return null;
+            }
+
+            return ZaiResetStatus.From(payload);
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or InvalidOperationException ||
+                                   (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            this._logger.LogDebug(ex, "Z.ai reset-card status lookup failed");
+            return null;
+        }
     }
 
     private ProviderUsage BuildTimeLimitResult(ZaiQuotaLimitItem timeLimit, ProviderConfig config, string responseString, int httpStatus)
@@ -586,5 +642,105 @@ public class ZaiProvider : ProviderBase
 
         [JsonPropertyName("usage")]
         public long Usage { get; set; }
+    }
+
+    private sealed class ZaiResetStatusResponse
+    {
+        [JsonPropertyName("available_five_hour_resets")]
+        public List<ZaiResetCard>? AvailableFiveHourResets { get; set; }
+
+        [JsonPropertyName("available_week_resets")]
+        public List<ZaiResetCard>? AvailableWeekResets { get; set; }
+    }
+
+    private sealed class ZaiResetCard
+    {
+        [JsonPropertyName("expire_at")]
+        public long? ExpireAt { get; set; }
+    }
+
+    private sealed class ZaiResetStatus
+    {
+        private readonly IReadOnlyList<DateTime> _fiveHourExpirations;
+        private readonly IReadOnlyList<DateTime> _weeklyExpirations;
+
+        private ZaiResetStatus(IReadOnlyList<DateTime> fiveHourExpirations, IReadOnlyList<DateTime> weeklyExpirations)
+        {
+            this._fiveHourExpirations = fiveHourExpirations;
+            this._weeklyExpirations = weeklyExpirations;
+        }
+
+        public static ZaiResetStatus From(ZaiResetStatusResponse response) => new(
+            ConvertExpirations(response.AvailableFiveHourResets),
+            ConvertExpirations(response.AvailableWeekResets));
+
+        public int GetAvailableCount(string cardId) => this.GetExpirations(cardId)?.Count ?? 0;
+
+        public IReadOnlyList<DateTime>? GetExpirations(string cardId) => cardId switch
+        {
+            "5h" => this._fiveHourExpirations,
+            "weekly" => this._weeklyExpirations,
+            _ => null,
+        };
+
+        private static IReadOnlyList<DateTime> ConvertExpirations(IEnumerable<ZaiResetCard>? cards) => cards?
+            .Where(card => card.ExpireAt is > 0)
+            .Select(card => DateTimeOffset.FromUnixTimeSeconds(card.ExpireAt!.Value).UtcDateTime)
+            .OrderBy(expiry => expiry)
+            .ToArray() ?? Array.Empty<DateTime>();
+    }
+
+    internal sealed record ZaiResetCredentials(string ZcodeAuthorization, string CodingPlanAuthorization)
+    {
+        private const string ZcodeTokenEnvironmentVariable = "ZCODE_JWT_TOKEN";
+        private const string ZaiTokenEnvironmentVariable = "ZAI_OAUTH_ACCESS_TOKEN";
+
+        public static ZaiResetCredentials? TryLoad()
+        {
+            var zcodeToken = Environment.GetEnvironmentVariable(ZcodeTokenEnvironmentVariable);
+            var zaiToken = Environment.GetEnvironmentVariable(ZaiTokenEnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(zcodeToken) && !string.IsNullOrWhiteSpace(zaiToken))
+            {
+                return Create(zcodeToken, zaiToken);
+            }
+
+            try
+            {
+                var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".zcode", "v2", "credentials.json");
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
+
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                var root = document.RootElement;
+                return root.TryGetProperty("zcodejwttoken", out var zcode) &&
+                       root.TryGetProperty("oauth:zai:access_token", out var zai) &&
+                       zcode.ValueKind == JsonValueKind.String &&
+                       zai.ValueKind == JsonValueKind.String
+                    ? Create(zcode.GetString(), zai.GetString())
+                    : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static ZaiResetCredentials? Create(string? zcodeToken, string? zaiToken)
+        {
+            if (string.IsNullOrWhiteSpace(zcodeToken) || string.IsNullOrWhiteSpace(zaiToken))
+            {
+                return null;
+            }
+
+            var zcodeAuthorization = zcodeToken.Trim();
+            if (!zcodeAuthorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                zcodeAuthorization = $"Bearer {zcodeAuthorization}";
+            }
+
+            return new ZaiResetCredentials(zcodeAuthorization, zaiToken.Trim());
+        }
     }
 }

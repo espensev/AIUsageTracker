@@ -671,4 +671,28 @@ public sealed class MainWindowRuntimeLogicTests
         var lines = tooltip!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Single(lines, l => l.Contains("Reset credits available: 2", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void BuildTooltipContent_ZaiWeeklyResetCards_LabelsTheirWindowAndExpiry()
+    {
+        var expiry = DateTime.UtcNow.AddHours(4);
+        var usage = new ModelScopedProviderUsage
+        {
+            ProviderId = "zai-coding-plan",
+            ProviderName = "Z.ai Coding Plan",
+            CardId = "weekly",
+            Name = "Weekly",
+            WindowKind = WindowKind.Rolling,
+            IsAvailable = true,
+            IsQuotaBased = true,
+            UsedPercent = 20,
+            ResetCreditsAvailable = 2,
+            ResetCreditExpirationsUtc = new[] { expiry },
+        };
+
+        var tooltip = MainWindowRuntimeLogic.BuildTooltipContent(usage, usage.ProviderName!, useRelativeResetTime: false);
+
+        Assert.Contains("Weekly reset cards available: 2", tooltip, StringComparison.Ordinal);
+        Assert.Contains("Expires", tooltip, StringComparison.Ordinal);
+    }
 }

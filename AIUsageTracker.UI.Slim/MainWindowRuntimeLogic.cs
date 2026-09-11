@@ -385,9 +385,15 @@ internal static partial class MainWindowRuntimeLogic
 
         if (usage is QuotaProviderUsage qReset && qReset.ResetCreditsAvailable.HasValue)
         {
+            var usesWindowScopedResetCredits = ProviderMetadataCatalog.Find(usage.ProviderId ?? string.Empty)?.UsesWindowScopedResetCredits == true;
+            var resetLabel = usesWindowScopedResetCredits
+                ? usage is ModelScopedProviderUsage { CardId: "weekly" }
+                    ? "Weekly reset cards available"
+                    : "5-hour reset cards available"
+                : "Reset credits available";
             tooltipBuilder.AppendLine(
                 CultureInfo.InvariantCulture,
-                $"Reset credits available: {qReset.ResetCreditsAvailable.Value}");
+                $"{resetLabel}: {qReset.ResetCreditsAvailable.Value}");
             if (qReset.ResetCreditExpirationsUtc is { Count: > 0 } expirations)
             {
                 foreach (var expiry in expirations.OrderBy(value => value))

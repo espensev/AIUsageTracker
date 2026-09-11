@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.4.7-beta.3] - 2026-09-11
+
+### Fixed
+
+- **Z.ai Coding Plan now shows real expiring reset cards** — the tracker reads the signed-in ZCode reset-card status separately from normal quota windows, then shows the available 5-hour and weekly card counts and every card expiry in the matching plan tooltip. Reset cards are read-only; the tracker never spends one.
+
 ## [2.4.7-beta.2] - 2026-09-11
 
 ### Fixed
