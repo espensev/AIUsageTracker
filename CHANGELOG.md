@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.4.7-beta.2] - 2026-09-11
+
+### Fixed
+
+- **Z.ai Coding Plan reset tooltips are explicit per window** — each 5-hour or weekly quota card now identifies its quota window, available quota, and reset expiry time in the tooltip.
+
 ## [2.4.7-beta.1] - 2026-09-10
 
 ### Fixed
