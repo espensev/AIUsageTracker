@@ -42,8 +42,8 @@ public class ZaiProvider : ProviderBase
         BadgeInitial = "Z",
         QuotaWindows = new QuotaWindowDefinition[]
         {
-            new(WindowKind.Burst,   "5h",     PeriodDuration: TimeSpan.FromHours(5)),
-            new(WindowKind.Rolling, "Weekly", PeriodDuration: TimeSpan.FromDays(7)),
+            new(WindowKind.Burst,   "5h",     PeriodDuration: TimeSpan.FromHours(5), CardId: "5h"),
+            new(WindowKind.Rolling, "Weekly", PeriodDuration: TimeSpan.FromDays(7), CardId: "weekly"),
         },
     };
 

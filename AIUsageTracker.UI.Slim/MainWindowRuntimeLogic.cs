@@ -353,13 +353,23 @@ internal static partial class MainWindowRuntimeLogic
             tooltipBuilder.AppendLine($"Model provider: {modelProvider}");
         }
 
-        if (usage is ModelScopedProviderUsage m && !string.IsNullOrWhiteSpace(m.ModelName))
+        if (usage is ModelScopedProviderUsage { WindowKind: not WindowKind.None } windowUsage && !string.IsNullOrWhiteSpace(windowUsage.Name))
+        {
+            tooltipBuilder.AppendLine($"Quota window: {windowUsage.Name}");
+        }
+        else if (usage is ModelScopedProviderUsage m && !string.IsNullOrWhiteSpace(m.ModelName))
         {
             tooltipBuilder.AppendLine($"Model: {m.ModelName}");
         }
 
         tooltipBuilder.AppendLine($"Status: {(usage.IsAvailable ? "Active" : "Inactive")}");
-        if (!string.IsNullOrEmpty(usage.Description))
+        if (usage is QuotaProviderUsage quotaUsage && quotaUsage.IsQuotaBased && usage is ModelScopedProviderUsage { WindowKind: not WindowKind.None })
+        {
+            tooltipBuilder.AppendLine(showUsed
+                ? $"Quota: {UsageMath.FormatUsedPercent(quotaUsage.UsedPercent)}"
+                : $"Quota: {UsageMath.FormatRemainingPercent(quotaUsage.RemainingPercent)}");
+        }
+        else if (!string.IsNullOrEmpty(usage.Description))
         {
             if (usage is QuotaProviderUsage q && q.RequestsAvailable > 0)
             {
@@ -488,11 +498,14 @@ internal static partial class MainWindowRuntimeLogic
 
         var resetText = FormatTooltipResetText(usage, qUsage.NextResetTime.Value, useRelativeResetTime);
         var label = ResolveResetWindowLabel(usage);
+        var resetAction = usage is ModelScopedProviderUsage { WindowKind: not WindowKind.None }
+            ? "reset expires"
+            : "resets";
         tooltipBuilder.AppendLine();
         tooltipBuilder.AppendLine(
             string.IsNullOrWhiteSpace(label)
                 ? $"Resets: {resetText}"
-                : $"{label} resets: {resetText}");
+                : $"{label} {resetAction}: {resetText}");
     }
 
     private static void AppendWindowLine(

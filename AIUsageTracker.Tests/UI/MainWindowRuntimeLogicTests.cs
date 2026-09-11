@@ -297,6 +297,8 @@ public sealed class MainWindowRuntimeLogicTests
             ProviderName = "5h",
             ModelName = "5h",
             CardId = "5h",
+            Name = "5h",
+            WindowKind = WindowKind.Burst,
             IsAvailable = true,
             IsQuotaBased = true,
             PlanType = PlanType.Coding,
@@ -307,7 +309,36 @@ public sealed class MainWindowRuntimeLogicTests
         var tooltip = MainWindowRuntimeLogic.BuildTooltipContent(usage, usage.ProviderName!, useRelativeResetTime: false);
 
         Assert.NotNull(tooltip);
-        Assert.Contains($"5h resets: {UsageMath.FormatAbsoluteDate(reset)}", tooltip, StringComparison.Ordinal);
+        Assert.Contains("Quota window: 5h", tooltip, StringComparison.Ordinal);
+        Assert.Contains("Quota: 100% remaining", tooltip, StringComparison.Ordinal);
+        Assert.Contains($"5h reset expires: {UsageMath.FormatAbsoluteDate(reset)}", tooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildTooltipContent_ZaiWeeklyWindow_IncludesItsQuotaAndExpiry()
+    {
+        var reset = new DateTime(2026, 4, 22, 15, 45, 0, DateTimeKind.Utc);
+        var usage = new ModelScopedProviderUsage
+        {
+            ProviderId = "zai-coding-plan",
+            ProviderName = "Weekly",
+            ModelName = "Weekly",
+            CardId = "weekly",
+            Name = "Weekly",
+            WindowKind = WindowKind.Rolling,
+            IsAvailable = true,
+            IsQuotaBased = true,
+            PlanType = PlanType.Coding,
+            UsedPercent = 11,
+            NextResetTime = reset,
+        };
+
+        var tooltip = MainWindowRuntimeLogic.BuildTooltipContent(usage, usage.ProviderName!, useRelativeResetTime: false);
+
+        Assert.NotNull(tooltip);
+        Assert.Contains("Quota window: Weekly", tooltip, StringComparison.Ordinal);
+        Assert.Contains("Quota: 89% remaining", tooltip, StringComparison.Ordinal);
+        Assert.Contains($"Weekly reset expires: {UsageMath.FormatAbsoluteDate(reset)}", tooltip, StringComparison.Ordinal);
     }
 
     [Fact]

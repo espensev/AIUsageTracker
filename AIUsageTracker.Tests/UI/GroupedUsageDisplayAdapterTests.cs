@@ -848,6 +848,42 @@ public class GroupedUsageDisplayAdapterTests
     }
 
     [Fact]
+    public void Expand_ZaiSnapshot_UsesDeclaredFiveHourAndWeeklyWindows()
+    {
+        var snapshot = new AgentGroupedUsageSnapshot
+        {
+            Providers = new[]
+            {
+                new AgentGroupedProviderUsage
+                {
+                    ProviderId = "zai-coding-plan",
+                    ProviderName = "Z.ai Coding Plan",
+                    IsAvailable = true,
+                    IsQuotaBased = true,
+                    PlanType = PlanType.Coding,
+                    Models = new[]
+                    {
+                        new AgentGroupedModelUsage { ModelId = "5h", ModelName = "5h", UsedPercentage = 1, NextResetTime = DateTime.UtcNow.AddHours(2) },
+                        new AgentGroupedModelUsage { ModelId = "weekly", ModelName = "Weekly", UsedPercentage = 11, NextResetTime = DateTime.UtcNow.AddDays(6) },
+                    },
+                },
+            },
+        };
+
+        var usages = GroupedUsageDisplayAdapter.Expand(snapshot);
+
+        var fiveHour = Assert.IsType<ModelScopedProviderUsage>(Assert.Single(usages, usage => string.Equals(usage.CardId, "5h", StringComparison.Ordinal)));
+        Assert.Equal("5h", fiveHour.Name);
+        Assert.Equal(WindowKind.Burst, fiveHour.WindowKind);
+        Assert.Equal(TimeSpan.FromHours(5), fiveHour.PeriodDuration);
+
+        var weekly = Assert.IsType<ModelScopedProviderUsage>(Assert.Single(usages, usage => string.Equals(usage.CardId, "weekly", StringComparison.Ordinal)));
+        Assert.Equal("Weekly", weekly.Name);
+        Assert.Equal(WindowKind.Rolling, weekly.WindowKind);
+        Assert.Equal(TimeSpan.FromDays(7), weekly.PeriodDuration);
+    }
+
+    [Fact]
     public void Expand_LegacyPath_PropagatesStateFromSnapshot()
     {
         // Providers without models render a legacy parent card.
