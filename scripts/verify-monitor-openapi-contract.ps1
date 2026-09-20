@@ -9,17 +9,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 if ([string]::IsNullOrWhiteSpace($AgentExecutablePath)) {
-    $candidateExecutables = @(
-        (Join-Path $projectRoot "AIUsageTracker.Monitor\bin\Debug\net10.0\AIUsageTracker.Monitor.exe")
-    )
-
-    $defaultExe = $candidateExecutables | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($defaultExe)) {
-        $searched = $candidateExecutables -join ", "
-        throw "Agent executable not found. Searched: $searched. Build the solution before running this check."
-    }
-
-    $AgentExecutablePath = $defaultExe
+    $AgentExecutablePath = & "$PSScriptRoot/resolve-build-output.ps1" -Project "AIUsageTracker.Monitor" -Configuration Debug -Property ExecutablePath -RequireExists
 }
 elseif (-not (Test-Path -LiteralPath $AgentExecutablePath)) {
     throw "Agent executable not found: $AgentExecutablePath"

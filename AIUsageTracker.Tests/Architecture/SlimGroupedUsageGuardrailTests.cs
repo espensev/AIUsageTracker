@@ -77,17 +77,7 @@ public class SlimGroupedUsageGuardrailTests
         return Path.Combine([root, .. segments]);
     }
 
-    private static string GetRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "AIUsageTracker.sln")))
-        {
-            directory = directory.Parent;
-        }
-
-        return directory?.FullName
-            ?? throw new DirectoryNotFoundException("Could not locate repository root from test output directory.");
-    }
+    private static string GetRepoRoot() => RepositoryTestPaths.Root;
 
     private static List<string> GetMissingDerivedModelSelectorProviderIds(string providerId)
     {

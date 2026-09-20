@@ -51,19 +51,5 @@ public class NoGitHubCliTests
         Assert.Empty(violations);
     }
 
-    private static string GetRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-        while (dir != null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Directory.Build.props")))
-            {
-                return dir.FullName;
-            }
-
-            dir = dir.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repo root");
-    }
+    private static string GetRepoRoot() => RepositoryTestPaths.Root;
 }

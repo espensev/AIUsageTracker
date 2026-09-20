@@ -86,7 +86,8 @@ BenchmarkDotNet.Artifacts/
 # .NET Core
 project.lock.json
 project.fragment.lock.json
-artifacts/
+# Central SDK binaries/intermediates, publish staging, diagnostics and test results.
+/artifacts/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -478,7 +479,7 @@ Assets/icon_*.png
 !Assets/usage_icon.png
 /dist/
 
-# Temporary build artifacts
+# Legacy output locations (clean-build-output.ps1 -IncludeLegacy removes leftovers).
 bin_unlocked/
 run-cli.bat
 
@@ -508,6 +509,7 @@ nul
 fix_resources.*
 
 # CI Artifacts
+_ci_test_binaries/
 ci_screenshots/
 .claude/worktrees/
 .sonarqube/

@@ -45,8 +45,7 @@ function Get-AnalyzerWarnings {
         [string]$Label
     )
 
-    $workRoot = Join-Path $SourceRoot ".analyzer-gate"
-    $logRoot = Join-Path $workRoot "logs"
+    $logRoot = Join-Path $SourceRoot "artifacts/logs/analyzer-gate"
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $logPath = Join-Path $logRoot "${Label}-build.log"
     $outPath = Join-Path $logRoot "${Label}-build-output.txt"
@@ -209,7 +208,7 @@ foreach ($target in $buildTargets) {
     Write-Host "  - $target"
 }
 
-New-Item -ItemType Directory -Path (Join-Path $repoRoot ".analyzer-gate-output") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $repoRoot "artifacts/logs/analyzer-gate") -Force | Out-Null
 $worktreePath = Join-Path $repoRoot ".analyzer-gate-baseline"
 if (Test-Path $worktreePath) {
     Remove-Item $worktreePath -Recurse -Force
@@ -269,7 +268,7 @@ if ($newWarnings.Count -eq 0) {
     exit 0
 }
 
-$outputDir = Join-Path $repoRoot ".analyzer-gate-output"
+$outputDir = Join-Path $repoRoot "artifacts/logs/analyzer-gate"
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 $newListPath = Join-Path $outputDir "new-analyzer-warnings.txt"
 $summaryPath = Join-Path $outputDir "analyzer-regression-summary.md"

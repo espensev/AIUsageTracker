@@ -228,10 +228,7 @@ public class CodeGuardrailTests
         foreach (var projectDirectory in ProductionProjectDirectories)
         {
             var fullProjectDirectory = Path.Combine(repoRoot, projectDirectory);
-            if (!Directory.Exists(fullProjectDirectory))
-            {
-                continue;
-            }
+            Assert.True(Directory.Exists(fullProjectDirectory), $"Missing source guardrail inputs: {projectDirectory}");
 
             foreach (var extension in extensions)
             {
@@ -249,17 +246,7 @@ public class CodeGuardrailTests
         }
     }
 
-    private static string GetRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "AIUsageTracker.sln")))
-        {
-            directory = directory.Parent;
-        }
-
-        return directory?.FullName
-            ?? throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
-    }
+    private static string GetRepoRoot() => RepositoryTestPaths.Root;
 
     private static string GetRelativePath(string path)
     {

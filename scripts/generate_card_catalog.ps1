@@ -20,8 +20,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$binPath = Join-Path $projectRoot "AIUsageTracker.UI.Slim\bin\$Configuration\net10.0-windows10.0.17763.0"
-$exePath = Join-Path $binPath "AIUsageTracker.exe"
+$exePath = & "$PSScriptRoot/resolve-build-output.ps1" -Project "AIUsageTracker.UI.Slim" -Configuration $Configuration -Property ExecutablePath
 
 if (-not $SkipBuild) {
     Write-Host "Building project..." -ForegroundColor Cyan
@@ -40,14 +39,6 @@ if (-not (Test-Path $exePath)) {
     exit 1
 }
 
-# Kill any existing instances
-$existingProcesses = Get-Process -Name "AIUsageTracker" -ErrorAction SilentlyContinue
-if ($existingProcesses) {
-    Write-Host "Stopping existing instances..." -ForegroundColor Yellow
-    $existingProcesses | Stop-Process -Force
-    Start-Sleep -Seconds 2
-}
-
 $screenshotsDir = if ($OutputDir) { $OutputDir } else { Join-Path $projectRoot "docs" }
 New-Item -ItemType Directory -Path $screenshotsDir -Force | Out-Null
 
@@ -56,6 +47,7 @@ Write-Host "Output: $screenshotsDir\card-catalog\" -ForegroundColor Gray
 Write-Host ""
 
 $appArgs = @("--test", "--screenshot", "--card-catalog", "--output-dir", $screenshotsDir)
+$captureStartedAt = [DateTime]::UtcNow
 $process = Start-Process -FilePath $exePath -ArgumentList $appArgs -PassThru -WindowStyle Hidden
 
 $timeout = 120
@@ -71,14 +63,23 @@ if (-not $process.HasExited) {
     exit 1
 }
 
+$process.WaitForExit()
+if ($process.ExitCode -ne 0) {
+    Write-Host "ERROR: Card catalog process exited with code $($process.ExitCode)." -ForegroundColor Red
+    exit 1
+}
+
 $catalogDir = Join-Path $screenshotsDir "card-catalog"
 if (-not (Test-Path $catalogDir)) {
     Write-Host "ERROR: Card catalog directory was not created." -ForegroundColor Red
     exit 1
 }
 
-$pngFiles = Get-ChildItem -Path $catalogDir -Filter "card_*.png" -ErrorAction SilentlyContinue
+$pngFiles = Get-ChildItem -Path $catalogDir -Filter "card_*.png" -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTimeUtc -ge $captureStartedAt }
 $markdownFile = Join-Path $catalogDir "CARD-CATALOG.md"
+$markdownIsFresh = (Test-Path -LiteralPath $markdownFile -PathType Leaf) -and
+    (Get-Item -LiteralPath $markdownFile).LastWriteTimeUtc -ge $captureStartedAt
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -92,16 +93,16 @@ foreach ($file in ($pngFiles | Sort-Object Name)) {
 }
 
 Write-Host ""
-if (Test-Path $markdownFile) {
+if ($markdownIsFresh) {
     Write-Host "  OK: CARD-CATALOG.md" -ForegroundColor Green
 } else {
-    Write-Host "  MISSING: CARD-CATALOG.md" -ForegroundColor Red
+    Write-Host "  MISSING OR STALE: CARD-CATALOG.md" -ForegroundColor Red
 }
 
 Write-Host ""
 Write-Host "Total: $($pngFiles.Count) card screenshots captured." -ForegroundColor $(if ($pngFiles.Count -gt 0) { 'Green' } else { 'Red' })
 Write-Host "Location: $catalogDir" -ForegroundColor Gray
 
-if ($pngFiles.Count -eq 0) {
+if ($pngFiles.Count -eq 0 -or -not $markdownIsFresh) {
     exit 1
 }

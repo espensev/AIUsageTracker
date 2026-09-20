@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $enumPath = Join-Path $projectRoot "AIUsageTracker.Core/Models/AppTheme.cs"
-$exePath = Join-Path $projectRoot "AIUsageTracker.UI.Slim/bin/$Configuration/net10.0-windows10.0.17763.0/AIUsageTracker.exe"
+$exePath = & "$PSScriptRoot/resolve-build-output.ps1" -Project "AIUsageTracker.UI.Slim" -Configuration $Configuration -Property ExecutablePath
 
 if (-not (Test-Path $enumPath))
 {
@@ -61,14 +61,6 @@ $outputDir = Join-Path ([System.IO.Path]::GetTempPath()) ("AIUsageTracker/theme-
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
 Write-Host "Running Slim theme smoke test for $($themes.Count) themes..." -ForegroundColor Cyan
-
-$existingProcesses = Get-Process -Name "AIUsageTracker" -ErrorAction SilentlyContinue
-if ($existingProcesses)
-{
-    Write-Host "Stopping existing AIUsageTracker processes before smoke run..." -ForegroundColor Yellow
-    $existingProcesses | Stop-Process -Force
-    Start-Sleep -Seconds 2
-}
 
 foreach ($theme in $themes)
 {

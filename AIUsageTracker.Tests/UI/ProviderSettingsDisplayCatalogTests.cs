@@ -10,6 +10,71 @@ namespace AIUsageTracker.Tests.UI;
 public sealed class ProviderSettingsDisplayCatalogTests
 {
     [Fact]
+    public void GetProviderIdsRequiringDisambiguation_DuplicateDisplayNames_LabelsOnlyCollisions()
+    {
+        var duplicateIds = SettingsWindow.GetProviderIdsRequiringDisambiguation(
+            new[] { "minimax", "minimax-io", "codex" });
+
+        Assert.Contains("minimax", duplicateIds);
+        Assert.Contains("minimax-io", duplicateIds);
+        Assert.DoesNotContain("codex", duplicateIds);
+        Assert.Equal("MiniMax.io (minimax)", SettingsWindow.GetProviderSettingsDisplayLabel("minimax", duplicateIds.Contains("minimax")));
+        Assert.Equal("OpenAI (Codex)", SettingsWindow.GetProviderSettingsDisplayLabel("codex", duplicateIds.Contains("codex")));
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("  ", true)]
+    [InlineData(" CoDeX ", true)]
+    [InlineData("openai", true)]
+    [InlineData("minimax", false)]
+    public void MatchesProviderSearch_NameOrId_IgnoresCaseAndOuterWhitespace(string? searchText, bool expected)
+    {
+        Assert.Equal(expected, SettingsWindow.MatchesProviderSearch("codex", searchText));
+    }
+
+    [Fact]
+    public void CreateDisplayItems_ConfiguredProviderUnavailable_RemainsSearchable()
+    {
+        var fixture = SettingsWindowDeterministicFixture.Create();
+        var usage = Assert.Single(fixture.Usages, item => string.Equals(item.ProviderId, "codex", StringComparison.Ordinal));
+        usage.IsAvailable = false;
+
+        var items = SettingsWindow.CreateProviderDisplayItems(fixture.Configs, fixture.Usages);
+
+        var codex = Assert.Single(items, item => string.Equals(item.Config.ProviderId, "codex", StringComparison.Ordinal));
+        Assert.True(SettingsWindow.MatchesProviderSearch(codex.Config.ProviderId, "codex"));
+    }
+
+    [Fact]
+    public void CreateProviderDashboardGroups_UnavailableCachedCards_RemainEditableUnderTheirOwner()
+    {
+        var fixture = SettingsWindowDeterministicFixture.Create();
+        var usage = Assert.Single(fixture.Usages, item => string.Equals(item.ProviderId, "codex", StringComparison.Ordinal));
+        usage.IsAvailable = false;
+
+        var groups = SettingsWindow.CreateProviderDashboardGroups(fixture.Usages);
+
+        Assert.Contains(usage, groups["CODEX"]);
+        Assert.Equal(
+            MainWindowRuntimeLogic.BuildMainWindowUsageList(fixture.Usages).Select(item => item.ProviderId).Order(StringComparer.Ordinal),
+            groups.SelectMany(group => group).Select(item => item.ProviderId).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void CreateProviderDashboardGroups_HiddenCards_AreStillAvailableToShowAgain()
+    {
+        var fixture = SettingsWindowDeterministicFixture.Create();
+        var hiddenIds = new[] { "codex" };
+
+        var visible = MainWindowRuntimeLogic.BuildMainWindowUsageList(fixture.Usages, hiddenIds);
+        var groups = SettingsWindow.CreateProviderDashboardGroups(fixture.Usages);
+
+        Assert.DoesNotContain(visible, usage => string.Equals(usage.ProviderId, "codex", StringComparison.Ordinal));
+        Assert.Contains(groups["codex"], usage => string.Equals(usage.ProviderId, "codex", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void CreateDisplayItems_IncludesCatalogProviders_NotAlreadyConfigured()
     {
         var configs = new List<ProviderConfig>

@@ -103,55 +103,75 @@ public class BrowserService : IBrowserService
 
     private void StartWebService()
     {
-        var possiblePaths = new[]
+        var startInfo = ResolveWebStartInfo(AppContext.BaseDirectory);
+        if (startInfo == null)
         {
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", WebProjectName, "bin", "Debug", "net10.0", $"{WebProjectName}.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", WebProjectName, "bin", "Release", "net10.0", $"{WebProjectName}.exe"),
-            Path.Combine(AppContext.BaseDirectory, $"{WebProjectName}.exe"),
-        };
+            this._logger.LogWarning("Web executable and project directory not found; cannot auto-start Web service.");
+            return;
+        }
+
+        Process.Start(startInfo);
+        this._logger.LogInformation("Started Web service via {LaunchTarget} from {WorkingDirectory}", startInfo.FileName, startInfo.WorkingDirectory);
+    }
+
+    internal static ProcessStartInfo? ResolveWebStartInfo(string baseDirectory)
+    {
+        var outputDirectory = new DirectoryInfo(baseDirectory);
+        var binaryDirectory = outputDirectory.Parent?.Parent;
+        var executableName = $"{WebProjectName}.exe";
+        var usesArtifactsOutput = binaryDirectory != null
+            && string.Equals(binaryDirectory.Name, "bin", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(binaryDirectory.Parent?.Name, "artifacts", StringComparison.OrdinalIgnoreCase);
+        var possiblePaths = usesArtifactsOutput
+            ? new[]
+            {
+                // Use the same configuration/runtime as Slim, without invoking the SDK.
+                Path.Combine(binaryDirectory!.FullName, WebProjectName, outputDirectory.Name, executableName),
+                Path.Combine(baseDirectory, executableName),
+            }
+            : new[]
+            {
+                Path.Combine(baseDirectory, executableName),
+                Path.GetFullPath(Path.Combine(baseDirectory, "..", "Web", executableName)),
+                Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "..", WebProjectName, "bin", "Debug", "net10.0", executableName)),
+                Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "..", WebProjectName, "bin", "Release", "net10.0", executableName)),
+            };
 
         var webExecutablePath = possiblePaths.FirstOrDefault(File.Exists);
 
         if (string.IsNullOrWhiteSpace(webExecutablePath))
         {
-            var webProjectDirectory = FindProjectDirectory(WebProjectName);
+            var webProjectDirectory = FindProjectDirectory(baseDirectory, WebProjectName);
             if (!string.IsNullOrWhiteSpace(webProjectDirectory))
             {
-                var startFromProject = new ProcessStartInfo
+                return new ProcessStartInfo
                 {
                     FileName = "dotnet",
                     Arguments = $"run --project \"{webProjectDirectory}\" --urls \"{WebUiUrl}\"",
-                    UseShellExecute = true,
+                    UseShellExecute = false,
                     CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
                     WorkingDirectory = webProjectDirectory,
                 };
-
-                Process.Start(startFromProject);
-                this._logger.LogInformation("Started Web service via dotnet run from {ProjectDirectory}", webProjectDirectory);
-                return;
             }
 
-            this._logger.LogWarning("Web executable and project directory not found; cannot auto-start Web service.");
-            return;
+            return null;
         }
 
-        var startExecutable = new ProcessStartInfo
+        return new ProcessStartInfo
         {
             FileName = webExecutablePath,
             Arguments = $"--urls \"{WebUiUrl}\"",
-            UseShellExecute = true,
+            UseShellExecute = false,
             CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = Path.GetDirectoryName(webExecutablePath),
         };
-
-        Process.Start(startExecutable);
-        this._logger.LogInformation("Started Web service executable from {ExecutablePath}", webExecutablePath);
     }
 
-    private static string? FindProjectDirectory(string projectName)
+    private static string? FindProjectDirectory(string baseDirectory, string projectName)
     {
-        var currentDirectory = AppContext.BaseDirectory;
-        var searchDirectory = new DirectoryInfo(currentDirectory);
+        var searchDirectory = new DirectoryInfo(baseDirectory);
 
         while (searchDirectory != null)
         {

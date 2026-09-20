@@ -4,7 +4,7 @@
   #define MyAppVersion "2.4.7-beta.3"
 #endif
 #ifndef SourcePath
-  #define SourcePath "..\dist\publish-win-x64"
+  #define SourcePath "..\artifacts\publish\win-x64"
 #endif
 #ifndef MyAppArch
   #define MyAppArch "x64"

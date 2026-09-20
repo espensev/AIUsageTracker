@@ -2,7 +2,11 @@
   <PropertyGroup>
     <TrackerVersion>2.4.7-beta.3</TrackerVersion>
     <TrackerAssemblyVersion>2.4.7</TrackerAssemblyVersion>
-    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\artifacts\**\*</DefaultItemExcludes>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <!-- Exclude legacy outputs after switching the SDK's default output locations. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\artifacts\**\*;**\bin\**;**\obj\**;**\bin_unlocked\**;**\bin_unlocked_ui\**;**\TempBin\**</DefaultItemExcludes>
+    <VSTestResultsDirectory>$(ArtifactsPath)/test-results/$(MSBuildProjectName)</VSTestResultsDirectory>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>

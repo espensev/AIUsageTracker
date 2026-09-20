@@ -23,6 +23,21 @@
                       CornerRadius="0" />
     </WindowChrome.WindowChrome>
 
+    <Window.Resources>
+        <Style x:Key="ActionFocusVisual" TargetType="Control">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate>
+                        <Border BorderBrush="{DynamicResource PrimaryText}" BorderThickness="1" Margin="2" CornerRadius="2"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource ActionFocusVisual}"/>
+        </Style>
+    </Window.Resources>
+
     <Border BorderBrush="{DynamicResource BorderColor}" BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions>
@@ -34,15 +49,22 @@
 
             <!-- Compact Header -->
             <Border x:Name="HeaderBorder" Background="{DynamicResource HeaderBackground}" Padding="8,6" Grid.Row="0">
-                <DockPanel>
-                    <Image Source="Assets/app_icon.ico" Width="16" Height="16" Margin="0,0,6,0" DockPanel.Dock="Left"/>
-                    <TextBlock Text="AI Usage Tracker" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryText}" DockPanel.Dock="Left"/>
-                    <TextBlock x:Name="VersionText" Text="v..." FontSize="10" Foreground="{DynamicResource TertiaryText}" VerticalAlignment="Center" Margin="6,1,0,0" DockPanel.Dock="Left"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button x:Name="PrivacyBtn" Content="&#xE785;" Click="PrivacyBtn_Click" Background="Transparent" Foreground="{DynamicResource SecondaryText}" Width="26" Margin="0,0,8,0" ToolTip="Toggle Privacy Mode (Ctrl+P)" FontFamily="Segoe MDL2 Assets" FontSize="14" WindowChrome.IsHitTestVisibleInChrome="True"/>
-                        <Button Content="X" Click="CloseBtn_Click" Background="Transparent" Foreground="{DynamicResource SecondaryText}" Width="18" FontSize="12" WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Image Source="Assets/app_icon.ico" Width="16" Height="16" Margin="0,0,6,0"/>
+                        <TextBlock Text="AI Usage Tracker" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryText}"/>
                     </StackPanel>
-                </DockPanel>
+                    <TextBlock x:Name="VersionText" Grid.Column="1" Text="v..." FontSize="10" Foreground="{DynamicResource TertiaryText}" VerticalAlignment="Center" Margin="6,1,4,0" TextTrimming="CharacterEllipsis"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button x:Name="PrivacyBtn" Content="&#xE785;" Click="PrivacyBtn_Click" Background="Transparent" Foreground="{DynamicResource SecondaryText}" Width="32" Height="32" Margin="0,0,4,0" ToolTip="Toggle Privacy Mode (Ctrl+P)" AutomationProperties.Name="Turn on privacy mode" FontFamily="Segoe MDL2 Assets" FontSize="14" WindowChrome.IsHitTestVisibleInChrome="True"/>
+                        <Button Content="&#xE8BB;" Click="CloseBtn_Click" Background="Transparent" Foreground="{DynamicResource SecondaryText}" Width="32" Height="32" FontFamily="Segoe MDL2 Assets" FontSize="12" ToolTip="Hide to tray (Escape)" AutomationProperties.Name="Hide to tray" WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Update Notification (hidden by default) -->
@@ -65,52 +87,60 @@
 
             <!-- Compact Footer -->
             <Border x:Name="FooterBorder" Grid.Row="3" Background="{DynamicResource FooterBackground}" Padding="8,6">
-                <DockPanel>
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,10,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,4">
                         <!-- Status LED Indicator -->
                         <Ellipse x:Name="StatusLed" Width="8" Height="8" Fill="{DynamicResource SecondaryText}" VerticalAlignment="Center" Margin="0,0,6,0"
                                  ToolTip="Last update: Never"/>
-                        <TextBlock x:Name="StatusText" Text="" FontSize="10" Foreground="{DynamicResource SecondaryText}" 
-                                   VerticalAlignment="Center" ToolTip="Last update: Never"/>
-                    </StackPanel>
-                    
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <CheckBox x:Name="AlwaysOnTopCheck" 
-                                  Content="Top" 
-                                  IsChecked="False"
-                                  Foreground="{DynamicResource SecondaryText}" 
-                                  VerticalAlignment="Center"
-                                  FontSize="11"
-                                  Margin="0,0,8,0"
-                                  Checked="AlwaysOnTop_Checked"
-                                  Unchecked="AlwaysOnTop_Checked"/>
-                        
-
-                         
-                          <CheckBox x:Name="ShowUsedToggle" 
-                                    Content="Show Used"
-                                     Foreground="{DynamicResource SecondaryText}"
-                                    VerticalAlignment="Center"
-                                    FontSize="11"
-                                    Margin="0,0,8,0"
-                                    ToolTip="Show used percentages instead of remaining percentages"
-                                    Checked="ShowUsedToggle_Checked"
-                                    Unchecked="ShowUsedToggle_Checked"/>
-                         
-                          <Button x:Name="RefreshBtn" Click="RefreshBtn_Click" Margin="0,0,8,0" ToolTip="Refresh (Ctrl+R)" Width="32" Height="28">
-                              <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
-                          </Button>
-                          <Button x:Name="WebBtn" Click="WebBtn_Click" Margin="0,0,8,0" ToolTip="Open Web UI" Width="32" Height="28">
-                              <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
-                          </Button>
-                          <Button x:Name="MonitorToggleBtn" Click="MonitorToggleBtn_Click" ToolTip="Start/Stop Monitor" Width="32" Height="28">
-                              <TextBlock x:Name="MonitorToggleIcon" Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
-                          </Button>
-                          <Button x:Name="SettingsBtn" Click="SettingsBtn_Click" Margin="8,0,0,0" ToolTip="Settings" Width="32" Height="28">
-                              <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
-                          </Button>
-                    </StackPanel>
-                </DockPanel>
+                        <TextBlock x:Name="StatusText" Text="" FontSize="11" Foreground="{DynamicResource SecondaryText}"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="Last update: Never" AutomationProperties.LiveSetting="Polite"/>
+                    </DockPanel>
+                    <DockPanel Grid.Row="1" LastChildFill="False">
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                            <CheckBox x:Name="AlwaysOnTopCheck"
+                                      Content="Top"
+                                      IsChecked="False"
+                                      Foreground="{DynamicResource SecondaryText}"
+                                      VerticalAlignment="Center"
+                                      FontSize="11"
+                                      MinHeight="32"
+                                      Margin="0,0,8,0"
+                                      ToolTip="Keep this window on top"
+                                      AutomationProperties.Name="Always on top"
+                                      Checked="AlwaysOnTop_Checked"
+                                      Unchecked="AlwaysOnTop_Checked"/>
+                            <CheckBox x:Name="ShowUsedToggle"
+                                      Content="Show used"
+                                      Foreground="{DynamicResource SecondaryText}"
+                                      VerticalAlignment="Center"
+                                      FontSize="11"
+                                      MinHeight="32"
+                                      Margin="0,0,8,0"
+                                      ToolTip="Show used percentages instead of remaining percentages"
+                                      AutomationProperties.Name="Show used percentages"
+                                      Checked="ShowUsedToggle_Checked"
+                                      Unchecked="ShowUsedToggle_Checked"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                            <Button x:Name="RefreshBtn" Click="RefreshBtn_Click" Margin="0,0,4,0" ToolTip="Refresh (Ctrl+R)" AutomationProperties.Name="Refresh usage" Width="32" Height="32">
+                                <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
+                            </Button>
+                            <Button x:Name="WebBtn" Click="WebBtn_Click" Margin="0,0,4,0" ToolTip="Open Web UI" AutomationProperties.Name="Open Web UI" Width="32" Height="32">
+                                <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
+                            </Button>
+                            <Button x:Name="MonitorToggleBtn" Click="MonitorToggleBtn_Click" ToolTip="Start Monitor" AutomationProperties.Name="Start Monitor" Width="32" Height="32">
+                                <TextBlock x:Name="MonitorToggleIcon" Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
+                            </Button>
+                            <Button x:Name="SettingsBtn" Click="SettingsBtn_Click" Margin="4,0,0,0" ToolTip="Settings (F2)" AutomationProperties.Name="Open settings" Width="32" Height="32">
+                                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center"/>
+                            </Button>
+                        </StackPanel>
+                    </DockPanel>
+                </Grid>
             </Border>
         </Grid>
     </Border>

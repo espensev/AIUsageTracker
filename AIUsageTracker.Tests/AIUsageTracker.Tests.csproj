@@ -34,10 +34,27 @@
     <Content Include="TestData\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\AIUsageTracker.UI.Slim\MainWindow.xaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>TestData\UI\MainWindow.xaml</Link>
+    </Content>
     <Content Include="..\AIUsageTracker.UI.Slim\Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
+  </ItemGroup>
+
+  <!-- Source guardrails and appcast checks run from the downloaded test artifact. -->
+  <ItemGroup>
+    <Content Include="..\**\*.cs;..\**\*.cshtml"
+             Exclude="..\artifacts\**;..\dist\**;..\**\bin\**;..\**\obj\**;..\**\bin_unlocked\**;..\**\bin_unlocked_ui\**;..\**\TempBin\**">
+      <Link>TestData\Repository\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\Directory.Build.props" Link="TestData\Repository\Directory.Build.props" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\appcast\*.xml" Link="TestData\Repository\appcast\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\AIUsageTracker.Monitor\openapi.yaml" Link="TestData\Repository\AIUsageTracker.Monitor\openapi.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\scripts\generate-appcast.sh" Link="TestData\Repository\scripts\generate-appcast.sh" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

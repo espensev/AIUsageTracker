@@ -50,7 +50,7 @@ Write-Host "Starting SonarQube scan for project: $ProjectKey"
 Write-Host "Server: $hostUrl"
 
 Set-Location $repoRoot
-$sonarUserHome = Join-Path $repoRoot ".sonar-user-home"
+$sonarUserHome = Join-Path $repoRoot "artifacts/sonar-user-home"
 New-Item -ItemType Directory -Path $sonarUserHome -Force | Out-Null
 
 Write-Host "`n--- Beginning analysis ---"
@@ -62,7 +62,7 @@ $sonarArgs = @(
     "/d:sonar.userHome=$sonarUserHome"
 )
 if (-not $SkipCoverage) {
-    $sonarArgs += "/d:sonar.cs.opencover.reportsPaths=TestResults/**/coverage.opencover.xml"
+    $sonarArgs += "/d:sonar.cs.opencover.reportsPaths=artifacts/test-results/**/coverage.opencover.xml"
     $sonarArgs += "/d:sonar.coverage.exclusions=**/Migrations/**,**/Program.cs,**/Seeder/**,scripts/**"
 }
 Invoke-DotNetOrThrow -Args $sonarArgs -Step "SonarScanner begin"
@@ -74,10 +74,12 @@ if (-not $SkipBuild) {
 
 if (-not $SkipCoverage) {
     Write-Host "`n--- Collecting coverage ---"
-    $testResultsDir = Join-Path $repoRoot "TestResults"
+    $testResultsDir = Join-Path $repoRoot "artifacts/test-results"
+    . "$PSScriptRoot/generated-path-safety.ps1"
+    Assert-GeneratedPath -RepositoryRoot $repoRoot -Path $testResultsDir
     if (Test-Path $testResultsDir) {
         Write-Host "  Cleaning previous test results..."
-        Remove-Item -Path $testResultsDir -Recurse -Force
+        Remove-Item -LiteralPath $testResultsDir -Recurse -Force
     }
 
     $testProjects = @(
@@ -91,7 +93,7 @@ if (-not $SkipCoverage) {
         $coverageArgs = @(
             "test", $proj.Path,
             "--configuration", "Debug",
-            "--results-directory", "TestResults",
+            "--results-directory", "artifacts/test-results",
             "--collect:XPlat Code Coverage;Format=opencover"
         )
         if (-not $SkipBuild) {
@@ -105,7 +107,7 @@ if (-not $SkipCoverage) {
         Invoke-DotNetOrThrow -Args $coverageArgs -Step "dotnet test coverage for $($proj.Path)"
     }
 
-    $coverageFiles = Get-ChildItem -Path "TestResults" -Recurse -Filter "coverage.opencover.xml"
+    $coverageFiles = Get-ChildItem -Path "artifacts/test-results" -Recurse -Filter "coverage.opencover.xml"
     Write-Host "`n  Coverage files collected: $($coverageFiles.Count)"
     foreach ($f in $coverageFiles) {
         Write-Host "    $($f.FullName)"

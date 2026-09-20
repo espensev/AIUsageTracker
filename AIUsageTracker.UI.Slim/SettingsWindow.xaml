@@ -280,231 +280,249 @@
 
                 <!-- Providers Tab -->
                 <TabItem Header="Providers">
-                    <ScrollViewer Padding="0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="20">
-                            <StackPanel x:Name="ProvidersStack"/>
-                            <!-- Provider Card Visibility (populated dynamically in code-behind) -->
-                            <TextBlock Text="Card Visibility" FontWeight="Bold" FontSize="14"
-                                       Margin="0,20,0,8" Foreground="{DynamicResource PrimaryText}"/>
-                            <TextBlock Text="Choose which provider cards appear in the main window."
-                                       FontSize="11" Margin="0,0,0,10"
-                                       Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap"/>
-                            <StackPanel x:Name="ProviderCardVisibilityPanel"/>
-                        </StackPanel>
-                    </ScrollViewer>
-                </TabItem>
-
-                <!-- Layout Tab -->
-                <TabItem Header="Cards">
-                    <Grid Margin="12,10,12,10">
+                    <Grid Margin="20,15,20,15">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-
-                        <!-- Section 1: Progress Bar & Colours -->
-                        <Grid Grid.Row="0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="20"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-
-                            <!-- Left: Progress bar appearance -->
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Progress Bar" FontWeight="Bold" FontSize="12"
-                                           Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="How usage progress is displayed on each card"
-                                           FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
-
-                                <CheckBox x:Name="BackgroundBarCheck" Content="Show progress bar fill"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="When enabled, the card background fills proportionally to usage.&#x0a;When disabled, a thin colour stripe on the left edge indicates status."
-                                          Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
-                                <CheckBox x:Name="CompactModeCheck" Content="No quota bar in background"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Removes the background progress fill entirely.&#x0a;Only the left-edge colour indicator remains."
-                                          Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
-
-                                <!-- Dual bars sub-group -->
-                                <CheckBox x:Name="ShowDualQuotaBarsCheck" Content="Dual quota bars"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Providers with two quota windows (e.g. 5-hour burst + 7-day rolling)&#x0a;show two stacked progress bars instead of one."
-                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
-                                <Grid Margin="18,0,0,0"
-                                      ToolTip="When dual bars are disabled, choose which quota window&#x0a;the single bar represents.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Single-bar window" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TertiaryText}" Margin="0,0,8,0" FontSize="10"/>
-                                    <ComboBox x:Name="DualQuotaBarWindowCombo" Grid.Column="1" Height="22"
-                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                              BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
-                                              SelectionChanged="LayoutSetting_Changed"/>
-                                </Grid>
-
-                                <!-- Pace colours sub-group -->
-                                <CheckBox x:Name="EnablePaceAdjustmentCheck" Content="Pace-aware colours"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Adjusts bar colour based on projected usage at the end of the period.&#x0a;A provider at 30% used with 6 days left shows green (on pace),&#x0a;even though 30% would normally be below the warning threshold."
-                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
-                                <Grid Margin="18,2,0,0"
-                                      ToolTip="Set at which projected usage percentage the bar turns yellow or red.&#x0a;These thresholds apply to both pace-adjusted and raw usage modes.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="38"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="38"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Yellow at" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="0,0,4,0"/>
-                                    <TextBox x:Name="YellowThreshold" Grid.Column="1" Text="60"
-                                             Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                             BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
-                                             ToolTip="Usage percentage where the bar turns yellow (warning)"
-                                             TextChanged="LayoutSetting_TextChanged"/>
-                                    <TextBlock Grid.Column="2" Text="Red at" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="8,0,4,0"/>
-                                    <TextBox x:Name="RedThreshold" Grid.Column="3" Text="80"
-                                             Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                             BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
-                                             ToolTip="Usage percentage where the bar turns red (danger)"
-                                             TextChanged="LayoutSetting_TextChanged"/>
-                                </Grid>
-                            </StackPanel>
-
-                            <!-- Right: Data display options -->
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Data Display" FontWeight="Bold" FontSize="12"
-                                           Foreground="{DynamicResource PrimaryText}"/>
-                                <TextBlock Text="What information is shown on each card"
-                                           FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
-
-                                <CheckBox x:Name="ShowUsedPercentagesCheck" Content="Show used percentages"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Display &quot;45% used&quot; instead of &quot;55% remaining&quot;.&#x0a;Also affects the progress bar direction."
-                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
-                                <CheckBox x:Name="ShowUsagePerHourCheck" Content="Show usage rate"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Adds a requests-per-hour badge (e.g. &quot;12.5/hr&quot;) to each card.&#x0a;Requires the Usage Rate slot to be assigned below."
-                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
-                                <CheckBox x:Name="UseRelativeResetTimeCheck" Content="Relative reset times"
-                                          Foreground="{DynamicResource SecondaryText}" FontSize="11"
-                                          ToolTip="Show reset time as a countdown (e.g. &quot;2d 15h&quot;)&#x0a;instead of an absolute time (e.g. &quot;Saturday 17:44&quot;)."
-                                          Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
-                            </StackPanel>
-                        </Grid>
-
-                        <!-- Section 2: Card Content (slots + presets) -->
-                        <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderColor}" Margin="0,10,0,8"/>
-                        <StackPanel Grid.Row="2">
-                            <TextBlock Text="Card Content Slots" FontWeight="Bold" FontSize="12"
+                        <StackPanel Margin="0,0,0,12">
+                            <TextBlock Text="Providers" FontWeight="SemiBold" FontSize="16"
                                        Foreground="{DynamicResource PrimaryText}"/>
-                            <TextBlock Text="Choose what data appears in each position on the card (right side, left to right)"
-                                       FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <Grid Grid.Column="0" Grid.Row="0" Margin="0,2"
-                                      ToolTip="Main badge shown on the right side of the card.&#x0a;Typically a pace indicator or usage percentage.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="100"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Primary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
-                                    <ComboBox x:Name="PrimaryBadgeSlot" Grid.Column="1" Height="24"
-                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
-                                </Grid>
-
-                                <Grid Grid.Column="2" Grid.Row="0" Margin="0,2"
-                                      ToolTip="Secondary badge next to the primary.&#x0a;Good for usage rate or projected percentage.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="100"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Secondary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
-                                    <ComboBox x:Name="SecondaryBadgeSlot" Grid.Column="1" Height="24"
-                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
-                                </Grid>
-
-                                <Grid Grid.Column="0" Grid.Row="1" Margin="0,2"
-                                      ToolTip="Status text shown between the provider name and badges.&#x0a;Usually the remaining/used percentage or description.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="100"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Status Line" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
-                                    <ComboBox x:Name="StatusLineSlot" Grid.Column="1" Height="24"
-                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
-                                </Grid>
-
-                                <Grid Grid.Column="2" Grid.Row="1" Margin="0,2"
-                                      ToolTip="Reset time display on the far right.&#x0a;Shows when the quota window resets.">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="100"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Reset Info" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
-                                    <ComboBox x:Name="ResetInfoSlot" Grid.Column="1" Height="24"
-                                              Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                              BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
-                                </Grid>
-                            </Grid>
-
-                            <!-- Presets -->
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                <TextBlock Text="Presets:" Foreground="{DynamicResource TertiaryText}" VerticalAlignment="Center"
-                                           Margin="0,0,8,0" FontSize="11"/>
-                                <Button Content="Compact" Click="CardPresetCompact_Click" Padding="8,3" Margin="0,0,4,0"
-                                        ToolTip="Used % + Reset time only"
-                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
-                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
-                                <Button Content="Detailed" Click="CardPresetDetailed_Click" Padding="8,3" Margin="0,0,4,0"
-                                        ToolTip="Pace badge + Usage rate + Status + Reset time"
-                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
-                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
-                                <Button Content="Pace Focus" Click="CardPresetPace_Click" Padding="8,3" Margin="0,0,12,0"
-                                        ToolTip="Pace badge + Projected % + Daily budget + Reset time"
-                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
-                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="22" FontSize="10" Cursor="Hand"/>
-                                <ComboBox x:Name="UserPresetCombo" Width="120" Height="22"
-                                          ToolTip="Your saved slot configurations"
-                                          Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
-                                          BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
-                                          SelectionChanged="CardUserPresetCombo_SelectionChanged"/>
-                                <Button Content="Save" Click="CardSavePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
-                                        ToolTip="Save current slot configuration as a named preset"
-                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
-                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="40" MinHeight="22" FontSize="10" Cursor="Hand"/>
-                                <Button Content="Del" Click="CardDeletePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
-                                        ToolTip="Delete the selected preset"
-                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
-                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="30" MinHeight="22" FontSize="10" Cursor="Hand"/>
-                            </StackPanel>
+                            <TextBlock Text="Manage connections and choose what appears on your dashboard."
+                                       FontSize="11" Margin="0,4,0,12" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SecondaryText}"/>
+                            <Label Content="Search providers" Target="{Binding ElementName=ProviderSearchBox}"
+                                   Padding="0,0,0,4" FontSize="11" Foreground="{DynamicResource SecondaryText}"/>
+                            <TextBox x:Name="ProviderSearchBox" Padding="8,6" MinHeight="32"
+                                     AutomationProperties.Name="Search providers"
+                                     Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                     BorderBrush="{DynamicResource ControlBorder}" TextChanged="ProviderSearch_TextChanged"/>
                         </StackPanel>
-
-                        <!-- Section 3: Live Preview -->
-                        <Border Grid.Row="3" Height="1" Background="{DynamicResource BorderColor}" Margin="0,8,0,6"/>
-                        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="CardPreviewStack"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel>
+                                <StackPanel x:Name="ProvidersStack"/>
+                                <TextBlock x:Name="ProviderSearchEmptyText" Text="No matching providers. Try another name or clear the search."
+                                           Visibility="Collapsed" FontSize="11" Margin="0,12" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryText}"/>
+                            </StackPanel>
                         </ScrollViewer>
                     </Grid>
+                </TabItem>
+
+                <!-- Cards Tab -->
+                <TabItem Header="Cards">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="20,15,20,15">
+                            <TextBlock Text="Card layout" FontWeight="SemiBold" FontSize="16"
+                                       Foreground="{DynamicResource PrimaryText}"/>
+                            <TextBlock Text="Choose a layout and preview it with your provider data."
+                                       FontSize="11" Foreground="{DynamicResource SecondaryText}" Margin="0,4,0,10" TextWrapping="Wrap"/>
+                            <WrapPanel Margin="0,0,0,12">
+                                <Button Content="Compact" Click="CardPresetCompact_Click" Padding="14,7" Margin="0,0,4,0"
+                                        ToolTip="Used % + Reset time only"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="32" FontSize="11" Cursor="Hand"/>
+                                <Button Content="Detailed" Click="CardPresetDetailed_Click" Padding="14,7" Margin="0,0,4,0"
+                                        ToolTip="Pace badge + Usage rate + Status + Reset time"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="32" FontSize="11" Cursor="Hand"/>
+                                <Button Content="Pace Focus" Click="CardPresetPace_Click" Padding="14,7" Margin="0,0,12,0"
+                                        ToolTip="Pace badge + Projected % + Daily budget + Reset time"
+                                        Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="50" MinHeight="32" FontSize="11" Cursor="Hand"/>
+                            </WrapPanel>
+                            <TextBlock Text="Live preview" FontWeight="SemiBold" FontSize="12"
+                                       Foreground="{DynamicResource PrimaryText}" Margin="0,0,0,6"/>
+                            <Border BorderBrush="{DynamicResource CardBorder}" BorderThickness="1"
+                                    CornerRadius="4" Padding="8" Background="{DynamicResource CardBackground}">
+                                <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="CardPreviewStack"/>
+                                </ScrollViewer>
+                            </Border>
+                            <Grid Margin="0,16,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="20"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Left: Progress bar appearance -->
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Progress Bar" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="How usage progress is displayed on each card"
+                                               FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+
+                                    <CheckBox x:Name="BackgroundBarCheck" Content="Show progress bar fill"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="When enabled, the card background fills proportionally to usage.&#x0a;When disabled, a thin colour stripe on the left edge indicates status."
+                                              Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
+                                    <CheckBox x:Name="CompactModeCheck" Content="No quota bar in background"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="Removes the background progress fill entirely.&#x0a;Only the left-edge colour indicator remains."
+                                              Checked="CardCompactMode_Changed" Unchecked="CardCompactMode_Changed" Margin="0,2"/>
+
+                                    <!-- Dual bars sub-group -->
+                                    <CheckBox x:Name="ShowDualQuotaBarsCheck" Content="Dual quota bars"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="Providers with two quota windows (e.g. 5-hour burst + 7-day rolling)&#x0a;show two stacked progress bars instead of one."
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
+                                    <Grid Margin="18,0,0,0"
+                                          ToolTip="When dual bars are disabled, choose which quota window&#x0a;the single bar represents.">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Single-bar window" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TertiaryText}" Margin="0,0,8,0" FontSize="10"/>
+                                        <ComboBox x:Name="DualQuotaBarWindowCombo" AutomationProperties.Name="Single-bar quota window" Grid.Column="1" Height="22"
+                                                  Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                  BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
+                                                  SelectionChanged="LayoutSetting_Changed"/>
+                                    </Grid>
+
+                                    <!-- Pace colours sub-group -->
+                                    <CheckBox x:Name="EnablePaceAdjustmentCheck" Content="Pace-aware colours"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="When pace data is available, green means on pace and red means over pace.&#x0a;Yellow is not used for pace-adjusted colours."
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,6,0,2"/>
+                                    <TextBlock Text="Raw usage thresholds" Margin="18,4,0,2" FontSize="10"
+                                               Foreground="{DynamicResource SecondaryText}"/>
+                                    <Grid Margin="18,2,0,0"
+                                          ToolTip="Used-percentage thresholds apply when pace-aware colours are off or pace data is unavailable.&#x0a;Pace-adjusted colours use green for on pace and red for over pace.">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="38"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="38"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Yellow at" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="0,0,4,0"/>
+                                        <TextBox x:Name="YellowThreshold" AutomationProperties.Name="Yellow threshold for raw used percentage" Grid.Column="1" Text="60"
+                                                 Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                 BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
+                                                 ToolTip="Used percentage where the bar turns yellow in raw usage mode"
+                                                 TextChanged="LayoutSetting_TextChanged"/>
+                                        <TextBlock Grid.Column="2" Text="Red at" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TertiaryText}" FontSize="10" Margin="8,0,4,0"/>
+                                        <TextBox x:Name="RedThreshold" AutomationProperties.Name="Red threshold for raw used percentage" Grid.Column="3" Text="80"
+                                                 Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                 BorderBrush="{DynamicResource ControlBorder}" Padding="4,2" FontSize="10"
+                                                 ToolTip="Used percentage where the bar turns red in raw usage mode"
+                                                 TextChanged="LayoutSetting_TextChanged"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- Right: Data display options -->
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Data Display" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="What information is shown on each card"
+                                               FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+
+                                    <CheckBox x:Name="ShowUsedPercentagesCheck" Content="Show used percentages"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="Display &quot;45% used&quot; instead of &quot;55% remaining&quot;.&#x0a;Also affects the progress bar direction."
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                                    <CheckBox x:Name="ShowUsagePerHourCheck" Content="Show usage rate"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="Adds a requests-per-hour badge (e.g. &quot;12.5/hr&quot;) to each card.&#x0a;Requires the Usage Rate slot to be assigned below."
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                                    <CheckBox x:Name="UseRelativeResetTimeCheck" Content="Relative reset times"
+                                              Foreground="{DynamicResource SecondaryText}" FontSize="11"
+                                              ToolTip="Show reset time as a countdown (e.g. &quot;2d 15h&quot;)&#x0a;instead of an absolute time (e.g. &quot;Saturday 17:44&quot;)."
+                                              Checked="LayoutSetting_Changed" Unchecked="LayoutSetting_Changed" Margin="0,2"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <Expander Header="Advanced card layout" FontSize="12" Margin="0,4,0,8"
+                                      Foreground="{DynamicResource PrimaryText}" AutomationProperties.Name="Advanced card layout">
+                                <StackPanel Margin="0,12,0,0">
+                                    <TextBlock Text="Card Content Slots" FontWeight="Bold" FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}"/>
+                                    <TextBlock Text="Choose what data appears in each position on the card (right side, left to right)"
+                                               FontSize="9" Foreground="{DynamicResource TertiaryText}" Margin="0,1,0,6"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Grid.Column="0" Grid.Row="0" Margin="0,2"
+                                              ToolTip="Main badge shown on the right side of the card.&#x0a;Typically a pace indicator or usage percentage.">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Primary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                            <ComboBox x:Name="PrimaryBadgeSlot" AutomationProperties.Name="Primary badge content" Grid.Column="1" Height="24"
+                                                      Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                      BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                        </Grid>
+
+                                        <Grid Grid.Column="2" Grid.Row="0" Margin="0,2"
+                                              ToolTip="Secondary badge next to the primary.&#x0a;Good for usage rate or projected percentage.">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Secondary Badge" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                            <ComboBox x:Name="SecondaryBadgeSlot" AutomationProperties.Name="Secondary badge content" Grid.Column="1" Height="24"
+                                                      Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                      BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                        </Grid>
+
+                                        <Grid Grid.Column="0" Grid.Row="1" Margin="0,2"
+                                              ToolTip="Status text shown between the provider name and badges.&#x0a;Usually the remaining/used percentage or description.">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Status Line" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                            <ComboBox x:Name="StatusLineSlot" AutomationProperties.Name="Status line content" Grid.Column="1" Height="24"
+                                                      Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                      BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                        </Grid>
+
+                                        <Grid Grid.Column="2" Grid.Row="1" Margin="0,2"
+                                              ToolTip="Reset time display on the far right.&#x0a;Shows when the quota window resets.">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Reset Info" Foreground="{DynamicResource SecondaryText}" VerticalAlignment="Center" FontSize="11"/>
+                                            <ComboBox x:Name="ResetInfoSlot" AutomationProperties.Name="Reset information content" Grid.Column="1" Height="24"
+                                                      Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                      BorderBrush="{DynamicResource ControlBorder}" SelectionChanged="CardSlotConfig_Changed"/>
+                                        </Grid>
+                                    </Grid>
+
+                                    <TextBlock Text="Saved layouts" FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource PrimaryText}" Margin="0,14,0,6"/>
+                                    <WrapPanel>
+                                        <ComboBox x:Name="UserPresetCombo" AutomationProperties.Name="Saved card layouts" Width="120" Height="22"
+                                                  ToolTip="Your saved slot configurations"
+                                                  Background="{DynamicResource ControlBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                  BorderBrush="{DynamicResource ControlBorder}" FontSize="10"
+                                                  SelectionChanged="CardUserPresetCombo_SelectionChanged"/>
+                                        <Button Content="Save" Click="CardSavePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
+                                                ToolTip="Save current slot configuration as a named preset"
+                                                Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="40" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                        <Button Content="Delete" Click="CardDeletePresetBtn_Click" Padding="6,2" Margin="4,0,0,0"
+                                                ToolTip="Delete the selected preset"
+                                                Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource PrimaryText}"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" MinWidth="30" MinHeight="22" FontSize="10" Cursor="Hand"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabItem>
 
                 <TabItem Header="Layout">

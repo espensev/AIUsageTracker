@@ -4,6 +4,7 @@
 
 using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -59,7 +60,7 @@ internal sealed class ProviderCardRenderer
         var grid = new Grid
         {
             Margin = new Thickness(isChild ? 20 : 0, 0, 0, isCompact ? 1 : 2),
-            Height = isCompact ? 20 : 24,
+            MinHeight = isCompact ? 20 : 24,
             Background = Brushes.Transparent,
             Tag = providerId,
         };
@@ -80,14 +81,17 @@ internal sealed class ProviderCardRenderer
         this.AddCardBackground(grid, pGrid, presentation, cardPaceColor);
 
         var contentPadding = isCompact ? 4 : 6;
-        var contentPanel = new DockPanel { LastChildFill = false, Margin = new Thickness(contentPadding, 0, contentPadding, 0) };
+        var contentPanel = new DockPanel { LastChildFill = true };
+        var statusPanel = isCompact ? contentPanel : new DockPanel { LastChildFill = false, HorizontalAlignment = HorizontalAlignment.Right };
+        var detailsPanel = isCompact ? contentPanel : new DockPanel { LastChildFill = false, Margin = new Thickness(0, 2, 0, 0) };
         this.AddCardIcon(contentPanel, providerId, isChild, isCompact);
 
-        // Right-side slots rendered from right to left (rightmost = first added)
-        this.RenderSlot(contentPanel, this._preferences.CardResetInfo, usage, presentation, showUsed, cardPaceColor);
-        this.RenderSlot(contentPanel, this._preferences.CardPrimaryBadge, usage, presentation, showUsed, cardPaceColor);
-        this.RenderSlot(contentPanel, this._preferences.CardSecondaryBadge, usage, presentation, showUsed, cardPaceColor);
-        this.RenderSlot(contentPanel, this._preferences.CardStatusLine, usage, presentation, showUsed, cardPaceColor);
+        // Keep the main quota/status aligned at the right edge across cards.
+        this.RenderSlot(statusPanel, this._preferences.CardStatusLine, usage, presentation, showUsed, cardPaceColor);
+        this.AddStatusBadges(detailsPanel, presentation);
+        this.RenderSlot(detailsPanel, this._preferences.CardResetInfo, usage, presentation, showUsed, cardPaceColor);
+        this.RenderSlot(detailsPanel, this._preferences.CardPrimaryBadge, usage, presentation, showUsed, cardPaceColor);
+        this.RenderSlot(detailsPanel, this._preferences.CardSecondaryBadge, usage, presentation, showUsed, cardPaceColor);
 
         var accountName = MainWindowRuntimeLogic.ResolveDisplayAccountName(
             providerId,
@@ -103,14 +107,40 @@ internal sealed class ProviderCardRenderer
                 isChild),
             Dock.Left);
 
-        this.AddStatusBadges(contentPanel, presentation);
-        grid.Children.Add(contentPanel);
-
-        if (presentation.IsStale)
+        if (isCompact)
         {
-            grid.Opacity = 0.55;
+            contentPanel.Margin = new Thickness(contentPadding, 0, contentPadding, 0);
+            grid.Children.Add(contentPanel);
+        }
+        else
+        {
+            var contentGrid = new Grid { Margin = new Thickness(contentPadding, 3, contentPadding, 3) };
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+            contentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            contentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            contentGrid.Children.Add(contentPanel);
+            if (statusPanel.Children.Count == 0)
+            {
+                Grid.SetColumnSpan(contentPanel, 2);
+            }
+            else
+            {
+                Grid.SetColumn(statusPanel, 1);
+                contentGrid.Children.Add(statusPanel);
+            }
+
+            if (detailsPanel.Children.Count > 0)
+            {
+                Grid.SetRow(detailsPanel, 1);
+                Grid.SetColumnSpan(detailsPanel, 2);
+                contentGrid.Children.Add(detailsPanel);
+            }
+
+            grid.Children.Add(contentGrid);
         }
 
+        AutomationProperties.SetName(grid, $"{friendlyName}: {presentation.StatusText}");
         this.AttachTooltip(grid, usage, friendlyName);
 
         return grid;
@@ -151,6 +181,11 @@ internal sealed class ProviderCardRenderer
             string freshnessText;
             if (ago.TotalMinutes < 1)
             {
+                if (!presentation.IsStale && !presentation.IsExpired && !presentation.IsError)
+                {
+                    return;
+                }
+
                 freshnessText = "just now";
             }
             else if (ago.TotalHours < 1)
@@ -185,8 +220,15 @@ internal sealed class ProviderCardRenderer
             friendlyName,
             this._preferences.UseRelativeResetTime,
             this._preferences.ShowUsedPercentages);
+        if (usage.FetchedAt != default)
+        {
+            var fetchedLocal = UsageMath.AsUtc(usage.FetchedAt).ToLocalTime();
+            toolTipContent = $"{toolTipContent}{Environment.NewLine}Last updated: {fetchedLocal:G}";
+        }
+
         if (!string.IsNullOrEmpty(toolTipContent))
         {
+            AutomationProperties.SetHelpText(grid, toolTipContent);
             grid.ToolTip = this._createToolTip(grid, toolTipContent);
             this._configureToolTip(grid);
         }
@@ -511,7 +553,12 @@ internal sealed class ProviderCardRenderer
             ProviderCardStatusTone.Error => Brushes.Red,
             _ => this._getResourceBrush(ResourceKeySecondaryText, Brushes.Gray),
         };
-        this.AddSlotText(panel, statusText, statusBrush, 10);
+        if (presentation.ShouldHaveProgress && presentation.StatusTone == ProviderCardStatusTone.Secondary)
+        {
+            statusBrush = this._getResourceBrush("PrimaryText", Brushes.White);
+        }
+
+        this.AddSlotText(panel, statusText, statusBrush, 10, presentation.ShouldHaveProgress ? FontWeights.SemiBold : FontWeights.Normal);
     }
 
     private void RenderResetSlot(DockPanel panel, CardSlotContent slot, ProviderUsage usage, ProviderCardPresentation presentation)
@@ -543,7 +590,7 @@ internal sealed class ProviderCardRenderer
             resetText = FormatResetText(resetTime.Value, resetLabel, UsageMath.FormatAbsoluteDate);
         }
 
-        this.AddSlotText(panel, resetText, this._getResourceBrush("StatusTextWarning", Brushes.Goldenrod), 10, FontWeights.SemiBold);
+        this.AddSlotText(panel, resetText, this._getResourceBrush(ResourceKeySecondaryText, Brushes.Gray), 9);
     }
 
     private (DateTime? ResetTime, string? ResetLabel) ResolveDisplayedReset(
@@ -645,7 +692,8 @@ internal sealed class ProviderCardRenderer
                 fontSize: compact ? fontSize - 1 : fontSize,
                 foreground: foreground,
                 fontWeight: fontWeight ?? FontWeights.Normal,
-                margin: new Thickness(compact ? 4 : 6, 0, 0, 0)),
+                margin: new Thickness(compact ? 4 : 6, 0, 0, 0),
+                textTrimming: TextTrimming.CharacterEllipsis),
             Dock.Right);
     }
 

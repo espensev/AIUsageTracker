@@ -574,6 +574,9 @@ public partial class MainWindow : Window
         }
 
         this.PrivacyBtn.Content = this._isPrivacyMode ? "\uE72E" : "\uE785";
+        System.Windows.Automation.AutomationProperties.SetName(
+            this.PrivacyBtn,
+            this._isPrivacyMode ? "Turn off privacy mode" : "Turn on privacy mode");
         this.PrivacyBtn.Foreground = this._isPrivacyMode
             ? Brushes.Gold
             : GetResourceBrush("SecondaryText", Brushes.Gray);
@@ -861,6 +864,9 @@ public partial class MainWindow : Window
         {
             this.MonitorToggleIcon.Text = isRunning ? "\uE71A" : "\uE768";
             this.MonitorToggleBtn.ToolTip = isRunning ? "Stop Monitor" : "Start Monitor";
+            System.Windows.Automation.AutomationProperties.SetName(
+                this.MonitorToggleBtn,
+                isRunning ? "Stop Monitor" : "Start Monitor");
         }
     }
 

@@ -49,7 +49,7 @@ jobs:
         with:
           name: analyzer-gate-results
           path: |
-            .analyzer-gate-output/new-analyzer-warnings.txt
-            .analyzer-gate-output/analyzer-regression-summary.md
+            artifacts/logs/analyzer-gate/new-analyzer-warnings.txt
+            artifacts/logs/analyzer-gate/analyzer-regression-summary.md
           if-no-files-found: ignore
           retention-days: 7

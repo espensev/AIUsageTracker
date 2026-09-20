@@ -18,7 +18,7 @@ namespace AIUsageTracker.Tests.Core;
 /// </summary>
 public sealed class AppcastXmlConsistencyTests
 {
-    private static readonly string RepoRoot = FindRepoRoot();
+    private static readonly string RepoRoot = RepositoryTestPaths.Root;
     private static readonly XNamespace Sparkle = "http://www.andymatuschak.org/xml-namespaces/sparkle";
 
     // ── File existence ────────────────────────────────────────────────────────
@@ -309,21 +309,5 @@ public sealed class AppcastXmlConsistencyTests
         var enclosure = item!.Element("enclosure");
         Assert.NotNull(enclosure);
         return (item!, enclosure!);
-    }
-
-    private static string FindRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Directory.Build.props")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repo root — no Directory.Build.props found in any parent directory.");
     }
 }

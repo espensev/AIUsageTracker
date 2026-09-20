@@ -18,6 +18,13 @@ on:
       - "scripts/Seeder/**"
       - "scripts/run-vstest-with-retry.ps1"
       - "scripts/resolve-test-assembly.ps1"
+      - "scripts/resolve-build-output.ps1"
+      - "scripts/write-build-output-manifest.ps1"
+      - "scripts/clean-build-output.ps1"
+      - "scripts/generated-path-safety.ps1"
+      - "scripts/test-build-output-tools.ps1"
+      - "scripts/test-run-slim-actions.ps1"
+      - "scripts/run-slim-and-monitor.ps1"
       - "scripts/validate-test-quarantine.ps1"
       - "scripts/verify-theme-contract.ps1"
       - ".github/workflows/tests.yml"
@@ -38,6 +45,13 @@ on:
       - "scripts/Seeder/**"
       - "scripts/run-vstest-with-retry.ps1"
       - "scripts/resolve-test-assembly.ps1"
+      - "scripts/resolve-build-output.ps1"
+      - "scripts/write-build-output-manifest.ps1"
+      - "scripts/clean-build-output.ps1"
+      - "scripts/generated-path-safety.ps1"
+      - "scripts/test-build-output-tools.ps1"
+      - "scripts/test-run-slim-actions.ps1"
+      - "scripts/run-slim-and-monitor.ps1"
       - "scripts/validate-test-quarantine.ps1"
       - "scripts/verify-theme-contract.ps1"
       - ".github/workflows/tests.yml"
@@ -89,6 +103,9 @@ jobs:
               - 'AIUsageTracker.CLI/**'
               - 'AIUsageTracker.Tests/**'
               - 'scripts/run-vstest-with-retry.ps1'
+              - 'scripts/*build-output*.ps1'
+              - 'scripts/generated-path-safety.ps1'
+              - 'scripts/resolve-test-assembly.ps1'
               - '.github/test-quarantine.txt'
               - '.github/workflows/tests.yml'
             monitor:
@@ -100,6 +117,9 @@ jobs:
               - 'AIUsageTracker.Infrastructure/**'
               - 'AIUsageTracker.Tests/**'
               - 'scripts/run-vstest-with-retry.ps1'
+              - 'scripts/*build-output*.ps1'
+              - 'scripts/generated-path-safety.ps1'
+              - 'scripts/resolve-test-assembly.ps1'
               - '.github/test-quarantine.txt'
               - '.github/workflows/tests.yml'
             web:
@@ -112,6 +132,9 @@ jobs:
               - 'AIUsageTracker.Infrastructure/**'
               - 'scripts/Seeder/**'
               - 'scripts/run-vstest-with-retry.ps1'
+              - 'scripts/*build-output*.ps1'
+              - 'scripts/generated-path-safety.ps1'
+              - 'scripts/resolve-test-assembly.ps1'
               - '.github/test-quarantine.txt'
               - '.github/workflows/tests.yml'
             cross:
@@ -165,7 +188,7 @@ jobs:
           $runMonitor = "$env:RUN_MONITOR" -eq "true"
           $runWeb = "$env:RUN_WEB" -eq "true"
 
-          if ($runAll -or $runCore -or $runMonitor) {
+          if ($runAll -or $runCore -or $runMonitor -or $runWeb) {
             dotnet restore AIUsageTracker.Tests/AIUsageTracker.Tests.csproj
             dotnet restore AIUsageTracker.Monitor.Tests/AIUsageTracker.Monitor.Tests.csproj
           }
@@ -189,7 +212,7 @@ jobs:
           $runMonitor = "$env:RUN_MONITOR" -eq "true"
           $runWeb = "$env:RUN_WEB" -eq "true"
 
-          if ($runAll -or $runCore -or $runMonitor) {
+          if ($runAll -or $runCore -or $runMonitor -or $runWeb) {
             dotnet build AIUsageTracker.Tests/AIUsageTracker.Tests.csproj --configuration Debug --no-restore
             dotnet build AIUsageTracker.Monitor.Tests/AIUsageTracker.Monitor.Tests.csproj --configuration Debug --no-restore
           }
@@ -207,16 +230,33 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-theme-contract.ps1
         shell: pwsh
 
+      - name: Verify build output tools
+        shell: pwsh
+        run: |
+          ./scripts/test-build-output-tools.ps1
+          ./scripts/test-run-slim-actions.ps1
+
+      - name: Record exact test assembly paths
+        shell: pwsh
+        run: |
+          ./scripts/write-build-output-manifest.ps1 -Projects @(
+            'AIUsageTracker.Tests/AIUsageTracker.Tests.csproj',
+            'AIUsageTracker.Monitor.Tests/AIUsageTracker.Monitor.Tests.csproj',
+            'AIUsageTracker.Web.Tests/AIUsageTracker.Web.Tests.csproj',
+            'scripts/Seeder/Seeder.csproj'
+          )
+
       - name: Upload test binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: test-binaries-debug
+          include-hidden-files: true
           path: |
-            AIUsageTracker.Tests/bin/Debug/net10.0-windows10.0.17763.0/**
-            AIUsageTracker.Monitor.Tests/bin/Debug/net10.0-windows10.0.17763.0/**
-            AIUsageTracker.Monitor.Tests/bin/Debug/net10.0/**
-            AIUsageTracker.Web.Tests/bin/Debug/net10.0-windows10.0.17763.0/**
-            scripts/Seeder/bin/Debug/net10.0/**
+            artifacts/bin/AIUsageTracker.Tests/**
+            artifacts/bin/AIUsageTracker.Monitor.Tests/**
+            artifacts/bin/AIUsageTracker.Web.Tests/**
+            artifacts/bin/Seeder/**
+            artifacts/build-output-manifest.json
             scripts/run-vstest-with-retry.ps1
             scripts/resolve-test-assembly.ps1
             .github/test-quarantine.txt
@@ -254,7 +294,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: core-test-results
-          path: TestResults/core-tests*.trx
+          path: artifacts/test-results/core-tests*.trx
           if-no-files-found: ignore
           retention-days: 3
 
@@ -289,7 +329,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: monitor-startup-config-results
-          path: TestResults/monitor-startup-config*.trx
+          path: artifacts/test-results/monitor-startup-config*.trx
           if-no-files-found: ignore
           retention-days: 3
 
@@ -324,7 +364,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: monitor-test-results
-          path: TestResults/monitor-tests*.trx
+          path: artifacts/test-results/monitor-tests*.trx
           if-no-files-found: ignore
           retention-days: 3
 
@@ -377,7 +417,7 @@ jobs:
         shell: pwsh
         run: |
           $ciBinaries = Join-Path $PWD "_ci_test_binaries"
-          $seederPath = Join-Path $ciBinaries "scripts\Seeder\bin\Debug\net10.0\Seeder.dll"
+          $seederPath = & (Join-Path $ciBinaries "scripts/resolve-test-assembly.ps1") -RootPath $ciBinaries -ProjectName "Seeder" -AssemblyName "Seeder.dll"
           $fixturePath = Join-Path $ciBinaries "test-fixtures\provider-data.json"
           if (Test-Path $seederPath) {
             & dotnet $seederPath $fixturePath
@@ -457,7 +497,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: web-test-results
-          path: TestResults/web-tests*.trx
+          path: artifacts/test-results/web-tests*.trx
           if-no-files-found: ignore
           retention-days: 3
 

@@ -59,7 +59,7 @@ public partial class MainWindow : Window
             {
                 var (header, container) = this.CreateCollapsibleHeader(
                     section.Title,
-                    section.IsQuotaBased ? Brushes.DeepSkyBlue : Brushes.MediumSeaGreen,
+                    GetResourceBrush("SecondaryText", Brushes.Gray),
                     isGroupHeader: true,
                     groupKey: section.SectionKey,
                     () => MainWindowRuntimeLogic.GetSectionIsCollapsed(this._preferences, section.IsQuotaBased),
@@ -187,7 +187,7 @@ public partial class MainWindow : Window
             new Thickness(0, 0, 10, 0));
         titleBlock.VerticalAlignment = VerticalAlignment.Center;
 
-        var line = this.CreateSeparator(accent, lineOpacity);
+        var line = this.CreateSeparator(GetResourceBrush("BorderColor", Brushes.Gray), lineOpacity);
 
         var container = new StackPanel();
         if (!string.IsNullOrEmpty(groupKey))

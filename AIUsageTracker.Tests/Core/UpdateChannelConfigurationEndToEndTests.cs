@@ -273,19 +273,5 @@ public sealed class UpdateChannelConfigurationEndToEndTests : IDisposable
         return $"{GitHubUpdateChecker.GetReleasesPageUrl()}/download/v{version}/AIUsageTracker_Setup_v{version}_win-{architecture}.exe";
     }
 
-    private static string GetRepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "Directory.Build.props")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repo root.");
-    }
+    private static string GetRepoRoot() => RepositoryTestPaths.Root;
 }

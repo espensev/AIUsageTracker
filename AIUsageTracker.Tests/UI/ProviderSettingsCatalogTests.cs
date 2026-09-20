@@ -12,6 +12,28 @@ public sealed class ProviderSettingsCatalogTests
     private static readonly string TestApiKey = Guid.NewGuid().ToString();
 
     [Fact]
+    public void GetProviderConnectionStatus_UnavailableWithStoredCredential_DoesNotClaimConnected()
+    {
+        var fixture = SettingsWindowDeterministicFixture.Create();
+        var config = Assert.Single(fixture.Configs, item => string.Equals(item.ProviderId, "codex", StringComparison.Ordinal));
+        var usage = Assert.Single(fixture.Usages, item => string.Equals(item.ProviderId, "codex", StringComparison.Ordinal));
+        config.ApiKey = TestApiKey;
+        usage.IsAvailable = false;
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage, isDerived: false);
+
+        Assert.Equal("Unavailable", SettingsWindow.GetProviderConnectionStatus(config, usage, behavior));
+    }
+
+    [Fact]
+    public void GetProviderConnectionStatus_StoredCredentialWithoutUsage_AwaitsRefresh()
+    {
+        var config = new ProviderConfig { ProviderId = "codex", ApiKey = TestApiKey };
+        var behavior = SettingsWindow.ResolveProviderSettingsBehavior(config, usage: null, isDerived: false);
+
+        Assert.Equal("Configured · awaiting refresh", SettingsWindow.GetProviderConnectionStatus(config, usage: null, behavior));
+    }
+
+    [Fact]
     public void GetInputMode_ReturnsSessionAuth_ForCodexSpark()
     {
         var config = new ProviderConfig { ProviderId = "codex.spark", ApiKey = string.Empty };

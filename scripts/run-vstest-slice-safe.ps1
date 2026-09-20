@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TestCaseFilter,
     [int]$TimeoutSeconds = 20,
-    [string]$ResultsDirectory = ".tmp\vstest-slices",
+    [string]$ResultsDirectory = "artifacts/test-results/vstest-slices",
     [string]$LogName = "slice.log"
 )
 

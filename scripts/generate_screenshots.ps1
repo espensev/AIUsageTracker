@@ -16,8 +16,7 @@ Write-Host ""
 
 # Determine the correct paths
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$binPath = Join-Path $projectRoot "AIUsageTracker.UI.Slim\bin\$Configuration\net10.0-windows10.0.17763.0"
-$exePath = Join-Path $binPath "AIUsageTracker.exe"
+$exePath = & "$PSScriptRoot/resolve-build-output.ps1" -Project "AIUsageTracker.UI.Slim" -Configuration $Configuration -Property ExecutablePath
 
 # Check if executable exists before optional build
 if (-not (Test-Path $exePath) -and $SkipBuild) {
@@ -55,14 +54,6 @@ Write-Host "Starting screenshot capture process..." -ForegroundColor Cyan
 Write-Host "Privacy Mode: ENABLED (hardcoded for screenshots)" -ForegroundColor Green
 Write-Host ""
 
-# Kill any existing instances
-$existingProcesses = Get-Process -Name "AIUsageTracker" -ErrorAction SilentlyContinue
-if ($existingProcesses) {
-    Write-Host "Stopping existing instances..." -ForegroundColor Yellow
-    $existingProcesses | Stop-Process -Force
-    Start-Sleep -Seconds 2
-}
-
 if (-not $SkipBuild) {
     Write-Host "Building project..." -ForegroundColor Cyan
     $buildOutput = & dotnet build (Join-Path $projectRoot "AIUsageTracker.UI.Slim\AIUsageTracker.UI.Slim.csproj") --configuration $Configuration 2>&1
@@ -90,6 +81,7 @@ Write-Host "This will take 15-20 seconds..." -ForegroundColor Gray
 Write-Host ""
 
 $appArgs = @("--test", "--screenshot", "--output-dir", $screenshotsDir)
+$captureStartedAt = [DateTime]::UtcNow
 $process = Start-Process -FilePath $exePath -ArgumentList $appArgs -PassThru -WindowStyle Hidden
 
 # Wait for the process to complete (screenshot mode auto-exits)
@@ -110,14 +102,25 @@ if (-not $process.HasExited) {
     Write-Host "WARNING: Process timed out, forcing exit..." -ForegroundColor Yellow
     $process.Kill()
     $process.WaitForExit(5000)
+    exit 1
+}
+
+$process.WaitForExit()
+if ($process.ExitCode -ne 0) {
+    Write-Host "ERROR: Screenshot process exited with code $($process.ExitCode)." -ForegroundColor Red
+    exit 1
 }
 
 # Check if screenshots were created
 $expectedScreenshots = @(
     "screenshot_dashboard_privacy.png",
     "screenshot_settings_providers_privacy.png",
+    "screenshot_settings_cards_privacy.png",
     "screenshot_settings_layout_privacy.png",
     "screenshot_settings_history_privacy.png",
+    "screenshot_settings_notifications_privacy.png",
+    "screenshot_settings_monitor_privacy.png",
+    "screenshot_settings_updates_privacy.png",
     "screenshot_info_privacy.png"
 )
 
@@ -130,13 +133,14 @@ Write-Host ""
 $successCount = 0
 foreach ($screenshot in $expectedScreenshots) {
     $screenshotPath = Join-Path $screenshotsDir $screenshot
-    if (Test-Path $screenshotPath) {
+    if ((Test-Path -LiteralPath $screenshotPath -PathType Leaf) -and
+        (Get-Item -LiteralPath $screenshotPath).LastWriteTimeUtc -ge $captureStartedAt) {
         $fileInfo = Get-Item $screenshotPath
         $sizeKB = [math]::Round($fileInfo.Length / 1KB, 1)
         Write-Host "OK: $screenshot (${sizeKB} KB)" -ForegroundColor Green
         $successCount++
     } else {
-        Write-Host "MISSING: $screenshot" -ForegroundColor Red
+        Write-Host "MISSING OR STALE: $screenshot" -ForegroundColor Red
     }
 }
 

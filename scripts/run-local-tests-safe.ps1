@@ -4,7 +4,7 @@ param(
     [string]$Configuration = "Debug",
     [int]$MaxParallel = 1,
     [int]$TotalTimeoutMinutes = 10,
-    [string]$ResultsRoot = "TestResults/local-safe",
+    [string]$ResultsRoot = "artifacts/test-results/local-safe",
     [switch]$SkipBuild,
     [switch]$DryRun
 )
@@ -80,15 +80,14 @@ function Resolve-AssemblyPath {
         [string]$AssemblyName
     )
 
-    $projectDirectory = Split-Path -Parent $ProjectPath
-    $searchRoot = Join-Path $projectDirectory ("bin/{0}" -f $Configuration)
-    if (-not (Test-Path -LiteralPath $searchRoot)) {
+    $assemblyPath = & "$PSScriptRoot/resolve-build-output.ps1" -Project $ProjectPath -Configuration $Configuration
+    if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) {
         return $null
     }
-
-    return Get-ChildItem -Path $searchRoot -Recurse -File -Filter $AssemblyName |
-        Sort-Object LastWriteTimeUtc -Descending |
-        Select-Object -First 1
+    if ([IO.Path]::GetFileName($assemblyPath) -ne $AssemblyName) {
+        throw "Evaluated assembly does not match requested name: $assemblyPath"
+    }
+    return Get-Item -LiteralPath $assemblyPath
 }
 
 function Stop-ProcessTreeSafe {

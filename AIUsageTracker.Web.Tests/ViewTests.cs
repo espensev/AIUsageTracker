@@ -202,10 +202,24 @@ public class ViewTests : WebTestBase
     public async Task ProviderPage_HasProviderDetailsAsync()
     {
         using var client = CreateClient();
-        using var response = await client.GetAsync("/provider/openai");
+
+        // The recorded fixture has matching provider and history rows for Antigravity.
+        using var response = await client.GetAsync("/provider/antigravity");
         var html = await ReadBodyAsync(response);
         Assert.IsTrue(html.Contains("Usage History", StringComparison.OrdinalIgnoreCase), "Usage history heading should be present");
         Assert.IsTrue(html.Contains("<table", StringComparison.OrdinalIgnoreCase), "Provider detail table should be present");
+    }
+
+    [TestMethod]
+    public async Task ProviderPage_WithoutHistory_ShowsEmptyStateAsync()
+    {
+        using var client = CreateClient();
+        using var response = await client.GetAsync("/provider/unconfigured-test-provider");
+        var html = await ReadBodyAsync(response);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.IsTrue(html.Contains("Provider not found or no history available.", StringComparison.Ordinal));
+        Assert.IsFalse(html.Contains("Usage History", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

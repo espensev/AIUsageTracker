@@ -7,7 +7,12 @@ using Serilog;
 
 try
 {
-    var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var appData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+    if (string.IsNullOrWhiteSpace(appData))
+    {
+        appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    }
+
     var app = WebApplicationBootstrapper.Build(args, appData);
     await app.RunAsync().ConfigureAwait(false);
 }

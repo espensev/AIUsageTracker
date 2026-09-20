@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -40,41 +41,151 @@ public partial class SettingsWindow
         this.ProvidersStack.Children.Clear();
 
         var displayItems = CreateProviderDisplayItems(this._configs, this._usages);
+        var dashboardCards = CreateProviderDashboardGroups(this._usages);
+        var displayedIds = displayItems.Select(item => item.Config.ProviderId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var additionalGroups = dashboardCards.Where(group => !displayedIds.Contains(group.Key)).ToList();
+        var disambiguatedProviderIds = GetProviderIdsRequiringDisambiguation(
+            displayItems.Select(item => item.Config.ProviderId).Concat(additionalGroups.Select(group => group.Key)));
         foreach (var item in displayItems)
         {
             var usage = this._usages.FirstOrDefault(u =>
-                string.Equals(u.ProviderId, item.Config.ProviderId, StringComparison.OrdinalIgnoreCase));
-            this.AddProviderCard(item.Config, usage, item.IsDerived);
+                string.Equals(u.ProviderId, item.Config.ProviderId, StringComparison.OrdinalIgnoreCase))
+                ?? dashboardCards[item.Config.ProviderId].FirstOrDefault();
+            this.AddProviderCard(
+                item.Config,
+                usage,
+                dashboardCards[item.Config.ProviderId].ToList(),
+                item.IsDerived,
+                disambiguatedProviderIds.Contains(item.Config.ProviderId));
         }
 
-        this.PopulateProviderVisibilitySettings();
+        // Cards whose owner has no settings row still need an accessible visibility control.
+        foreach (var group in additionalGroups)
+        {
+            this.AddProviderCard(
+                CreateDefaultDisplayConfig(group.Key),
+                group.First(),
+                group.ToList(),
+                isDerived: true,
+                disambiguateDisplayName: disambiguatedProviderIds.Contains(group.Key));
+        }
+
+        this.ApplyProviderFilter();
     }
 
-    private void AddProviderCard(ProviderConfig config, ProviderUsage? usage, bool isDerived = false)
+    internal static ILookup<string, ProviderUsage> CreateProviderDashboardGroups(IReadOnlyCollection<ProviderUsage> usages)
     {
-        var isSubItem = false;
+        // Deliberately omit the hidden-item filter so hidden and unavailable cached cards remain editable.
+        return MainWindowRuntimeLogic.BuildMainWindowUsageList(usages)
+            .ToLookup(usage => ResolveProviderOwnerId(usage.ProviderId), StringComparer.OrdinalIgnoreCase);
+    }
 
+    internal static bool MatchesProviderSearch(string providerId, string? searchText)
+    {
+        var query = searchText?.Trim();
+        return string.IsNullOrEmpty(query) ||
+               providerId.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               ProviderMetadataCatalog.GetConfiguredDisplayName(providerId).Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static IReadOnlySet<string> GetProviderIdsRequiringDisambiguation(IEnumerable<string> providerIds)
+    {
+        return providerIds
+            .Where(providerId => !string.IsNullOrWhiteSpace(providerId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .GroupBy(
+                ProviderMetadataCatalog.GetConfiguredDisplayName,
+                StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .SelectMany(group => group)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static string GetProviderSettingsDisplayLabel(string providerId, bool disambiguateDisplayName)
+    {
+        var displayName = ProviderMetadataCatalog.GetConfiguredDisplayName(providerId);
+        return disambiguateDisplayName ? $"{displayName} ({providerId})" : displayName;
+    }
+
+    private void ProviderSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        this.ApplyProviderFilter();
+    }
+
+    private void ApplyProviderFilter()
+    {
+        if (this.ProvidersStack == null || this.ProviderSearchBox == null || this.ProviderSearchEmptyText == null)
+        {
+            return;
+        }
+
+        var visibleCount = 0;
+        foreach (var child in this.ProvidersStack.Children)
+        {
+            if (child is FrameworkElement { Tag: string providerId } card)
+            {
+                var matches = MatchesProviderSearch(providerId, this.ProviderSearchBox.Text);
+                card.Visibility = matches ? Visibility.Visible : Visibility.Collapsed;
+                visibleCount += matches ? 1 : 0;
+            }
+        }
+
+        this.ProviderSearchEmptyText.Visibility = visibleCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void AddProviderCard(
+        ProviderConfig config,
+        ProviderUsage? usage,
+        IReadOnlyList<ProviderUsage> dashboardCards,
+        bool isDerived,
+        bool disambiguateDisplayName)
+    {
         var card = new Border
         {
+            Tag = config.ProviderId,
             CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(1),
-            Margin = new Thickness(isSubItem ? 18 : 0, 0, 0, 8),
-            Padding = new Thickness(10, 8, 10, 8),
+            Margin = new Thickness(0, 0, 0, 8),
+            Padding = new Thickness(12, 10, 12, 10),
         };
         card.SetResourceReference(Border.BackgroundProperty, "CardBackground");
         card.SetResourceReference(Border.BorderBrushProperty, "CardBorder");
 
-        var grid = new Grid();
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Inputs
-
         var settingsBehavior = ResolveProviderSettingsBehavior(config, usage, isDerived);
-        var headerPanel = this.BuildProviderHeader(config, settingsBehavior, isSubItem);
+        var displayLabel = GetProviderSettingsDisplayLabel(config.ProviderId, disambiguateDisplayName);
+        var panel = new StackPanel();
+        panel.Children.Add(this.BuildProviderHeader(config, usage, settingsBehavior, dashboardCards, displayLabel));
+        if (dashboardCards.Count != 1)
+        {
+            panel.Children.Add(this.BuildProviderVisibilitySettings(dashboardCards));
+        }
 
-        grid.Children.Add(headerPanel);
+        if (!isDerived)
+        {
+            var details = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+            details.Children.Add(this.BuildProviderCredentials(config, usage, settingsBehavior));
+            details.Children.Add(this.BuildProviderOptions(config, settingsBehavior));
+            var expander = new Expander
+            {
+                Header = settingsBehavior.InputMode == ProviderInputMode.StandardApiKey ? "Credentials and options" : "Connection details and options",
+                Content = details,
+                FontSize = 11,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            expander.SetResourceReference(Control.ForegroundProperty, ResourceKeySecondaryText);
+            AutomationProperties.SetName(expander, $"{displayLabel} connection details and options");
+            panel.Children.Add(expander);
+        }
 
-        // Input row
+        card.Child = panel;
+        this.ProvidersStack.Children.Add(card);
+    }
+
+    private FrameworkElement BuildProviderCredentials(ProviderConfig config, ProviderUsage? usage, ProviderSettingsBehavior settingsBehavior)
+    {
         var keyPanel = new Grid { Margin = new Thickness(0, 0, 0, 0) };
+        keyPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        keyPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         keyPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         keyPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -87,13 +198,15 @@ public partial class SettingsWindow
             var testButton = this.BuildTestConnectionButton(config, keyContent);
             Grid.SetColumn(testButton, 1);
             keyPanel.Children.Add(testButton);
+            if (testButton.Tag is TextBlock resultText)
+            {
+                Grid.SetRow(resultText, 1);
+                Grid.SetColumnSpan(resultText, 2);
+                keyPanel.Children.Add(resultText);
+            }
         }
 
-        Grid.SetRow(keyPanel, 1);
-        grid.Children.Add(keyPanel);
-
-        card.Child = grid;
-        this.ProvidersStack.Children.Add(card);
+        return keyPanel;
     }
 
     internal static IReadOnlyList<ProviderSettingsDisplayItem> CreateProviderDisplayItems(
@@ -467,9 +580,32 @@ public partial class SettingsWindow
             : $"Next {resetLabel} reset: {resetText}";
     }
 
-    private StackPanel BuildProviderHeader(ProviderConfig config, ProviderSettingsBehavior settingsBehavior, bool isDerived)
+    internal static string GetProviderConnectionStatus(ProviderConfig config, ProviderUsage? usage, ProviderSettingsBehavior settingsBehavior)
     {
-        var headerPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        if (usage != null)
+        {
+            return usage.IsAvailable ? "Connected" : "Unavailable";
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.ApiKey))
+        {
+            return "Configured · awaiting refresh";
+        }
+
+        return settingsBehavior.InputMode == ProviderInputMode.AutoDetectedStatus ? "Waiting for local app" : "Not connected";
+    }
+
+    private Grid BuildProviderHeader(
+        ProviderConfig config,
+        ProviderUsage? usage,
+        ProviderSettingsBehavior settingsBehavior,
+        IReadOnlyList<ProviderUsage> dashboardCards,
+        string displayLabel)
+    {
+        var headerPanel = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        headerPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var icon = this.CreateProviderIcon(config.ProviderId);
         icon.Width = 16;
@@ -480,22 +616,46 @@ public partial class SettingsWindow
 
         var title = new TextBlock
         {
-            Text = isDerived
-                ? $"-> {ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId)}"
-                : ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId),
+            Text = displayLabel,
             FontWeight = FontWeights.SemiBold,
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
-            MinWidth = 120,
+            TextWrapping = TextWrapping.Wrap,
         };
         title.SetResourceReference(TextBlock.ForegroundProperty, "PrimaryText");
-        headerPanel.Children.Add(title);
+        var identity = new StackPanel();
+        identity.Children.Add(title);
+        var status = new TextBlock
+        {
+            Text = GetProviderConnectionStatus(config, usage, settingsBehavior),
+            FontSize = 11,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        status.SetResourceReference(TextBlock.ForegroundProperty, usage != null && !usage.IsAvailable ? ResourceKeyStatusTextWarning : ResourceKeySecondaryText);
+        identity.Children.Add(status);
+        Grid.SetColumn(identity, 1);
+        headerPanel.Children.Add(identity);
+        if (dashboardCards.Count == 1)
+        {
+            var visibility = this.BuildProviderVisibilitySettings(dashboardCards);
+            visibility.Margin = new Thickness(12, 0, 0, 0);
+            visibility.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(visibility, 2);
+            headerPanel.Children.Add(visibility);
+        }
 
-        headerPanel.Children.Add(this.CreateProviderHeaderCheckBox(
-            content: "Tray",
+        return headerPanel;
+    }
+
+    private WrapPanel BuildProviderOptions(ProviderConfig config, ProviderSettingsBehavior settingsBehavior)
+    {
+        var options = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        options.Children.Add(this.CreateProviderHeaderCheckBox(
+            content: "Show in tray",
             isChecked: config.ShowInTray,
-            margin: new Thickness(12, 0, 0, 0),
-            isEnabled: !isDerived,
+            margin: new Thickness(0, 4, 16, 4),
+            isEnabled: true,
             onCheckedChanged: isChecked =>
             {
                 var trackedConfig = this.GetOrCreateTrackedConfig(config);
@@ -503,11 +663,11 @@ public partial class SettingsWindow
                 this.MarkSettingsChanged(refreshTrayIcons: true);
             }));
 
-        headerPanel.Children.Add(this.CreateProviderHeaderCheckBox(
-            content: "Notify",
+        options.Children.Add(this.CreateProviderHeaderCheckBox(
+            content: "Notifications",
             isChecked: config.EnableNotifications,
-            margin: new Thickness(8, 0, 0, 0),
-            isEnabled: !isDerived,
+            margin: new Thickness(0, 4, 16, 4),
+            isEnabled: true,
             onCheckedChanged: isChecked =>
             {
                 var trackedConfig = this.GetOrCreateTrackedConfig(config);
@@ -516,14 +676,13 @@ public partial class SettingsWindow
             }));
 
         var definition = ProviderMetadataCatalog.Find(config.ProviderId);
-        if (!isDerived &&
-            settingsBehavior.InputMode == ProviderInputMode.AutoDetectedStatus &&
+        if (settingsBehavior.InputMode == ProviderInputMode.AutoDetectedStatus &&
             definition?.FamilyMode == ProviderFamilyMode.FlatWindowCards)
         {
-            headerPanel.Children.Add(this.CreateProviderHeaderCheckBox(
-                content: "Models offline",
+            options.Children.Add(this.CreateProviderHeaderCheckBox(
+                content: "Show cached models offline",
                 isChecked: config.ShowCachedModelsWhenOffline,
-                margin: new Thickness(8, 0, 0, 0),
+                margin: new Thickness(0, 4, 0, 4),
                 isEnabled: true,
                 onCheckedChanged: isChecked =>
                 {
@@ -533,12 +692,7 @@ public partial class SettingsWindow
                 }));
         }
 
-        if (settingsBehavior.IsInactive)
-        {
-            headerPanel.Children.Add(this.CreateInactiveBadge());
-        }
-
-        return headerPanel;
+        return options;
     }
 
     private CheckBox CreateProviderHeaderCheckBox(
@@ -552,7 +706,8 @@ public partial class SettingsWindow
         {
             Content = content,
             IsChecked = isChecked,
-            FontSize = 10,
+            FontSize = 11,
+            MinHeight = 24,
             VerticalAlignment = VerticalAlignment.Center,
             Cursor = Cursors.Hand,
             Margin = margin,
@@ -562,26 +717,6 @@ public partial class SettingsWindow
         checkBox.Checked += (_, _) => onCheckedChanged(true);
         checkBox.Unchecked += (_, _) => onCheckedChanged(false);
         return checkBox;
-    }
-
-    private Border CreateInactiveBadge()
-    {
-        var status = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(205, 92, 92)),
-            CornerRadius = new CornerRadius(3),
-            Margin = new Thickness(10, 0, 0, 0),
-            Padding = new Thickness(8, 3, 8, 3),
-        };
-
-        status.Child = new TextBlock
-        {
-            Text = "Inactive",
-            FontSize = 10,
-            Foreground = new SolidColorBrush(Color.FromRgb(240, 240, 240)),
-            FontWeight = FontWeights.SemiBold,
-        };
-        return status;
     }
 
     private FrameworkElement BuildApiKeyEditor(ProviderConfig config)
@@ -594,6 +729,7 @@ public partial class SettingsWindow
             FontSize = 11,
             IsReadOnly = this._isPrivacyMode,
         };
+        AutomationProperties.SetName(keyBox, $"{ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId)} API key");
 
         if (!this._isPrivacyMode)
         {
@@ -961,6 +1097,7 @@ public partial class SettingsWindow
             Limit = config.Limit,
             BaseUrl = config.BaseUrl,
             ShowInTray = config.ShowInTray,
+            ShowCachedModelsWhenOffline = config.ShowCachedModelsWhenOffline,
             EnableNotifications = config.EnableNotifications,
             EnabledSubTrays = config.EnabledSubTrays.ToList(),
             AuthSource = config.AuthSource,
@@ -977,70 +1114,49 @@ public partial class SettingsWindow
         };
     }
 
-    private void PopulateProviderVisibilitySettings()
+    private FrameworkElement BuildProviderVisibilitySettings(IReadOnlyList<ProviderUsage> cards)
     {
-        this.ProviderCardVisibilityPanel.Children.Clear();
-        var hidden = this._preferences.HiddenProviderItemIds;
-
-        // Run the same pipeline as the main window (no hidden filter) to get every card
-        // that could potentially appear, then group by owner provider.
-        var allCards = MainWindowRuntimeLogic.BuildMainWindowUsageList(this._usages).ToList();
-
-        var groups = allCards
-            .GroupBy(
-                u => ResolveProviderOwnerId(u.ProviderId ?? string.Empty),
-                StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        foreach (var group in groups)
+        if (cards.Count == 0)
         {
-            var cards = group.ToList();
-
-            if (cards.Count == 1)
-            {
-                // Single card: flat checkbox with no heading.
-                var usage = cards[0];
-                var checkBox = new CheckBox
-                {
-                    Content = usage.ProviderName ?? usage.ProviderId,
-                    Tag = usage.ProviderId,
-                    IsChecked = !hidden.Contains(usage.ProviderId ?? string.Empty, StringComparer.OrdinalIgnoreCase),
-                    Margin = new Thickness(0, 2, 0, 6),
-                    Foreground = (Brush)this.FindResource(ResourceKeySecondaryText),
-                };
-                checkBox.Checked += this.ProviderVisibility_Changed;
-                checkBox.Unchecked += this.ProviderVisibility_Changed;
-                this.ProviderCardVisibilityPanel.Children.Add(checkBox);
-            }
-            else
-            {
-                // Multiple cards for one provider: bold heading + indented checkboxes.
-                ProviderMetadataCatalog.TryGet(group.Key, out var definition);
-                this.ProviderCardVisibilityPanel.Children.Add(new TextBlock
-                {
-                    Text = definition?.DisplayName ?? group.Key,
-                    FontWeight = FontWeights.SemiBold,
-                    Margin = new Thickness(0, 4, 0, 4),
-                    Foreground = (Brush)this.FindResource(ResourceKeySecondaryText),
-                });
-
-                for (var i = 0; i < cards.Count; i++)
-                {
-                    var usage = cards[i];
-                    var checkBox = new CheckBox
-                    {
-                        Content = usage.ProviderName ?? usage.ProviderId,
-                        Tag = usage.ProviderId,
-                        IsChecked = !hidden.Contains(usage.ProviderId ?? string.Empty, StringComparer.OrdinalIgnoreCase),
-                        Margin = new Thickness(15, 2, 0, i == cards.Count - 1 ? 16 : 2),
-                        Foreground = (Brush)this.FindResource(ResourceKeySecondaryText),
-                    };
-                    checkBox.Checked += this.ProviderVisibility_Changed;
-                    checkBox.Unchecked += this.ProviderVisibility_Changed;
-                    this.ProviderCardVisibilityPanel.Children.Add(checkBox);
-                }
-            }
+            var waiting = this.CreateSecondaryStatusText("Dashboard cards appear after the first usage refresh.");
+            waiting.TextWrapping = TextWrapping.Wrap;
+            return waiting;
         }
+
+        var panel = new StackPanel();
+        foreach (var usage in cards.DistinctBy(card => card.ProviderId, StringComparer.OrdinalIgnoreCase))
+        {
+            var label = cards.Count == 1 ? "Show on dashboard" : usage.ProviderName ?? usage.ProviderId;
+            var checkBox = new CheckBox
+            {
+                Content = label,
+                Tag = usage.ProviderId,
+                IsChecked = !this._preferences.HiddenProviderItemIds.Contains(usage.ProviderId, StringComparer.OrdinalIgnoreCase),
+                Margin = new Thickness(0, 2, 0, 2),
+                MinHeight = 24,
+                FontSize = 11,
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            checkBox.SetResourceReference(Control.ForegroundProperty, ResourceKeySecondaryText);
+            AutomationProperties.SetName(checkBox, $"Show {usage.ProviderName ?? usage.ProviderId} on dashboard");
+            checkBox.Checked += this.ProviderVisibility_Changed;
+            checkBox.Unchecked += this.ProviderVisibility_Changed;
+            panel.Children.Add(checkBox);
+        }
+
+        if (cards.Count == 1)
+        {
+            return panel;
+        }
+
+        var expander = new Expander
+        {
+            Header = "Dashboard cards",
+            Content = panel,
+            FontSize = 11,
+        };
+        expander.SetResourceReference(Control.ForegroundProperty, ResourceKeySecondaryText);
+        return expander;
     }
 
     private void ProviderVisibility_Changed(object sender, RoutedEventArgs e)

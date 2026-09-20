@@ -193,13 +193,27 @@ internal static class MonitorLauncherProcessController
         };
     }
 
-    private static string[] GetExecutableCandidates(string baseDirectory, string monitorExecutableName)
+    internal static string[] GetExecutableCandidates(string baseDirectory, string monitorExecutableName)
     {
+        var outputDirectory = new DirectoryInfo(baseDirectory);
+        var binaryDirectory = outputDirectory.Parent?.Parent;
+        if (binaryDirectory != null
+            && string.Equals(binaryDirectory.Name, "bin", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(binaryDirectory.Parent?.Name, "artifacts", StringComparison.OrdinalIgnoreCase))
+        {
+            // Match the running application's configuration/runtime pivot. Never silently
+            // choose a different build or an installed Monitor from a development checkout.
+            return new[]
+            {
+                Path.Combine(binaryDirectory.FullName, MonitorProjectDirectoryName, outputDirectory.Name, monitorExecutableName),
+                Path.Combine(baseDirectory, monitorExecutableName),
+            };
+        }
+
         return new[]
         {
-            Path.Combine(baseDirectory, "..", "..", "..", "..", "AIUsageTracker.Monitor", "bin", "Debug", "net10.0", monitorExecutableName),
-            Path.Combine(baseDirectory, "..", "..", "..", "..", "AIUsageTracker.Monitor", "bin", "Release", "net10.0", monitorExecutableName),
             Path.Combine(baseDirectory, monitorExecutableName),
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "Monitor", monitorExecutableName)),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "AIUsageTracker", monitorExecutableName),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIUsageTracker", monitorExecutableName),
         };
@@ -252,7 +266,7 @@ internal static class MonitorLauncherProcessController
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{agentProjectDir}\" --urls \"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}\" -- --debug",
+            Arguments = $"run --project \"{agentProjectDir}\" --configuration {GetBuildConfiguration()} -- --urls \"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}\" --debug",
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
@@ -262,6 +276,15 @@ internal static class MonitorLauncherProcessController
         startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         return startInfo;
+    }
+
+    private static string GetBuildConfiguration()
+    {
+#if DEBUG
+        return "Debug";
+#else
+        return "Release";
+#endif
     }
 
     private static async Task<bool> TryStopProcessAsync(Process process, int stopWaitSeconds)

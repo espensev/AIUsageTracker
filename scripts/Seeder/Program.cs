@@ -37,7 +37,10 @@ public class Program
             return 1;
         }
 
-        return SeedDatabase(seedPath);
+        var dataRoot = args.Length > 1
+            ? Path.GetFullPath(args[1])
+            : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return SeedDatabase(seedPath, dataRoot);
     }
 
     private static string? ValidateFixturePath(string relativePath)
@@ -303,9 +306,8 @@ public class Program
         Console.WriteLine($"  7-day history: {fixture.History7Days.Count}");
     }
 
-    private static int SeedDatabase(string fixturePath)
+    private static int SeedDatabase(string fixturePath, string appData)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var dbDir = Path.Combine(appData, "AIUsageTracker");
         Directory.CreateDirectory(dbDir);
         var dbPath = Path.Combine(dbDir, "usage.db");

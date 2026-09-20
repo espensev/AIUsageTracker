@@ -72,10 +72,14 @@ The **Settings** window (⚙️ icon) is where you manage your AI providers and 
 
 ![Settings Providers](screenshot_settings_providers_privacy.png)
 
-Configure API keys for OpenAI, Anthropic, Gemini, etc.
+Search by provider name or ID. Each row shows connection status and dashboard visibility; expand its details for credentials, tray and notification options. Providers with several cards expose their dashboard choices together. Search preserves unsaved field edits.
 - **Tray**: Add a dedicated system tray icon for a specific provider.
 - **Notify**: Enable Windows notifications for that provider's quota events.
 - **Scan for Keys**: Automatically discover keys from environment variables and other apps (VS Code, GitHub, Claude Code, Roo Code).
+
+### Cards Tab
+
+Choose Compact, Detailed or Pace Focus and inspect the live preview. Progress fill, dual quota bars, pace-aware colours, show-used, usage-rate and reset text remain configurable. Advanced holds content slots and saved layouts. Yellow/red thresholds (defaults 60 / 80) apply to raw used percentages; pace-aware cards use green/red pace states. See [progress-bar rules](../DESIGN.md).
 
 ### Layout Tab
 

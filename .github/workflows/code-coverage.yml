@@ -51,13 +51,13 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          dotnet test AIUsageTracker.Tests\AIUsageTracker.Tests.csproj --configuration Debug --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
-          dotnet test AIUsageTracker.Monitor.Tests\AIUsageTracker.Monitor.Tests.csproj --configuration Debug --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory TestResults
+          dotnet test AIUsageTracker.Tests\AIUsageTracker.Tests.csproj --configuration Debug --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory artifacts/test-results
+          dotnet test AIUsageTracker.Monitor.Tests\AIUsageTracker.Monitor.Tests.csproj --configuration Debug --no-build --collect:"XPlat Code Coverage" --logger trx --results-directory artifacts/test-results
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v6
         with:
-          directory: TestResults
+          directory: artifacts/test-results
           files: "**/coverage.cobertura.xml"
           fail_ci_if_error: false
           verbose: true
@@ -69,6 +69,6 @@ jobs:
         with:
           name: code-coverage-results
           path: |
-            TestResults/**/*.trx
-            TestResults/**/coverage.cobertura.xml
+            artifacts/test-results/**/*.trx
+            artifacts/test-results/**/coverage.cobertura.xml
           retention-days: 3

@@ -1,4 +1,5 @@
 param(
+    [ValidateSet("win-x64", "win-x86", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")]
     [string]$Runtime = "win-x64",
     [string]$Version = "",
     [ValidateSet("balanced", "max", "compat")]
@@ -8,10 +9,15 @@ param(
 # AI Usage Tracker - Distribution Packaging Script
 # Usage: .\scripts\publish-app.ps1 -Runtime win-x64 -Version 2.4.7-beta.3 -InstallerCompression balanced
 
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. "$PSScriptRoot/generated-path-safety.ps1"
+Push-Location $repoRoot
+try {
 $isWinPlatform = $Runtime.StartsWith("win-")
 $projectName = if ($isWinPlatform) { "AIUsageTracker" } else { "AIUsageTracker.CLI" }
 $projectPath = if ($isWinPlatform) { ".\AIUsageTracker.UI.Slim\AIUsageTracker.UI.Slim.csproj" } else { ".\AIUsageTracker.CLI\AIUsageTracker.CLI.csproj" }
-$publishDir = ".\dist\publish-$Runtime"
+$publishDir = Join-Path $repoRoot "artifacts/publish/$Runtime"
 
 # If Version passed, synchronize it across all files
 if (-not [string]::IsNullOrEmpty($Version)) {
@@ -91,9 +97,11 @@ $cleanVersion = $Version.Split('-')[0]
 
 $zipPath = ".\dist\AIUsageTracker_v$Version`_$Runtime.zip"
 
-Write-Host "Cleaning dist folder for $Runtime..." -ForegroundColor Cyan
-if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
+Write-Host "Preparing publish staging for $Runtime..." -ForegroundColor Cyan
+Assert-GeneratedPath -RepositoryRoot $repoRoot -Path $publishDir
+if (Test-Path -LiteralPath $publishDir) { Remove-Item -LiteralPath $publishDir -Recurse -Force }
 New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $repoRoot "dist") -Force | Out-Null
 
 if ($isWinPlatform) {
     $windowsProjects = @(
@@ -118,6 +126,8 @@ if ($isWinPlatform) {
             -p:Version=$Version `
             -p:AssemblyVersion=$cleanVersion `
             -p:FileVersion=$cleanVersion
+
+        if ($LASTEXITCODE -ne 0) { throw "Publishing $($app.Name) failed with exit code $LASTEXITCODE." }
 
         $outputExe = Join-Path $componentDir $app.ExeName
         if (Test-Path $outputExe) {
@@ -147,6 +157,7 @@ if ($isWinPlatform) {
         -p:Version=$Version `
         -p:AssemblyVersion=$cleanVersion `
         -p:FileVersion=$cleanVersion
+    if ($LASTEXITCODE -ne 0) { throw "Publishing $projectName failed with exit code $LASTEXITCODE." }
 }
 
 Write-Host "Copying documentation..." -ForegroundColor Cyan
@@ -168,10 +179,10 @@ Write-Host "Creating Distribution ZIP..." -ForegroundColor Cyan
 # We compress the whole publish directory
 Compress-Archive -Path "$publishDir\*" -DestinationPath $zipPath -Force
 
-# Inno Setup Installer (Only for Windows)
-if ($isWinPlatform) {
+# Inno Setup Installer (only available on Windows hosts).
+if ($isWinPlatform -and [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
     $isccLocal = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-    $isccX86 = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    $isccX86 = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
     $iscc = if (Test-Path $isccLocal) { $isccLocal } else { $isccX86 }
 
     if ($iscc -and (Test-Path $iscc)) {
@@ -180,26 +191,12 @@ if ($isWinPlatform) {
         
         $archDef = if ($Runtime -like "*x64") { "x64" } elseif ($Runtime -like "*arm64") { "arm64" } else { "x86" }
         
-        & $iscc "scripts\setup.iss" "/DSourcePath=..\dist\publish-$Runtime" "/DMyAppVersion=$Version" "/DMyAppArch=$archDef" "/DInstallerCompression=$InstallerCompression"
+        $installerName = "AIUsageTracker_Setup_v$($Version)_$Runtime"
+        & $iscc "scripts\setup.iss" "/DSourcePath=$publishDir" "/DMyAppVersion=$Version" "/DMyAppArch=$archDef" "/DInstallerCompression=$InstallerCompression" "/F$installerName"
         if ($LASTEXITCODE -eq 0) {
-            # Move and rename the created setup to include architecture
-            $setupDir = ".\dist"
-            # The name in setup.iss is OutputBaseFilename=AIUsageTracker_Setup_v{#MyAppVersion}
-            # So it will be AIUsageTracker_Setup_v1.7.10.exe
-            $setupFile = Get-ChildItem "$setupDir\AIUsageTracker_Setup_v*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*_$Runtime.exe" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            
-            if ($setupFile) {
-                $newName = "AIUsageTracker_Setup_v$($Version)_$($Runtime).exe"
-                if ($setupFile.Name -ne $newName) {
-                    Rename-Item $setupFile.FullName -NewName $newName -Force
-                    Write-Host "Installer created and renamed: $newName" -ForegroundColor Green
-                } else {
-                    Write-Host "Installer created: $newName" -ForegroundColor Green
-                }
-            } else {
-                Write-Host "Error: Could not find generated setup file to rename." -ForegroundColor Red
-                exit 1
-            }
+            $installerPath = Join-Path $repoRoot "dist/$installerName.exe"
+            if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw "Installer not found: $installerPath" }
+            Write-Host "Installer created: $installerName.exe" -ForegroundColor Green
         } else {
             Write-Host "Inno Setup compilation failed." -ForegroundColor Yellow
             exit 1
@@ -209,8 +206,15 @@ if ($isWinPlatform) {
         exit 1
     }
 }
+elseif ($isWinPlatform) {
+    Write-Host "Skipping Windows installer creation on this non-Windows host; ZIP packaging is complete." -ForegroundColor Yellow
+}
 
 Write-Host "--------------------------------------------------" -ForegroundColor Yellow
 Write-Host "Distribution ready at: $zipPath" -ForegroundColor Green
 Write-Host "Size: $((Get-Item $zipPath).Length / 1MB) MB" -ForegroundColor Gray
 Write-Host "--------------------------------------------------" -ForegroundColor Yellow
+}
+finally {
+    Pop-Location
+}

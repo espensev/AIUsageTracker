@@ -37,6 +37,8 @@ set -x ANTHROPIC_API_KEY sk-ant-your-key-here
 
 ## Supported Environment Variables
 
+For isolated Web tests, `LOCALAPPDATA` selects the Web application's data and log root. If it is unset or blank, Web uses the operating system's local application-data directory. This override applies to Web; see [isolated Web test data](build-and-cleanup.md#isolated-web-test-data).
+
 | Environment Variable | Provider ID | Provider Name | Notes |
 |---|---|---|---|
 | `OPENAI_API_KEY` | `openai` | OpenAI | Standard user API keys (shows "Connected - Check Dashboard") |

@@ -11,6 +11,38 @@ namespace AIUsageTracker.Tests.Core;
 
 public class MonitorLauncherProcessControllerTests
 {
+    [Theory]
+    [InlineData("debug")]
+    [InlineData("release")]
+    [InlineData("release_win-x64")]
+    public void GetExecutableCandidates_ArtifactsLayout_UsesMatchingPivotOnly(string pivot)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "monitor-launch-layout");
+        var output = Path.Combine(root, "artifacts", "bin", "AIUsageTracker.UI.Slim", pivot);
+
+        var candidates = MonitorLauncherProcessController.GetExecutableCandidates(output, "AIUsageTracker.Monitor.exe");
+
+        Assert.Equal(
+            new[]
+            {
+                Path.Combine(root, "artifacts", "bin", "AIUsageTracker.Monitor", pivot, "AIUsageTracker.Monitor.exe"),
+                Path.Combine(output, "AIUsageTracker.Monitor.exe"),
+            },
+            candidates);
+    }
+
+    [Fact]
+    public void GetExecutableCandidates_PortableLayout_PrefersBundledMonitor()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "monitor-portable-layout");
+        var output = Path.Combine(root, "Tracker");
+
+        var candidates = MonitorLauncherProcessController.GetExecutableCandidates(output, "AIUsageTracker.Monitor.exe");
+
+        Assert.Equal(Path.Combine(output, "AIUsageTracker.Monitor.exe"), candidates[0]);
+        Assert.Equal(Path.Combine(root, "Monitor", "AIUsageTracker.Monitor.exe"), candidates[1]);
+    }
+
     [Fact]
     public void TryStartMonitorProcess_ReturnsFalse_WhenProcessStartReturnsNull()
     {
