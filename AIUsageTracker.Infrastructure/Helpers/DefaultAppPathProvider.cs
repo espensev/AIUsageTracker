@@ -63,6 +63,11 @@ public class DefaultAppPathProvider : IAppPathProvider
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
+    public string? GetEnvironmentVariable(string name)
+    {
+        return Environment.GetEnvironmentVariable(name);
+    }
+
     private static string GetCanonicalAppDataRoot(string localAppDataRoot)
     {
         return Path.Join(localAppDataRoot, AppDirectoryName);

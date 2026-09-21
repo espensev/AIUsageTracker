@@ -24,6 +24,18 @@
 
 No discovery env vars on: `antigravity`, `github-copilot`, `grok` (`%USERPROFILE%\.grok\auth.json`), `opencode-zen`.
 
+## CLI home overrides
+
+Session files follow the owning CLI's own relocation variable, tried before the profile default. Any `%NAME%` token in `AuthIdentityCandidatePathTemplates` expands this way (`AuthPathTemplateResolver`); an unset variable drops that candidate. The lookup goes through `IAppPathProvider.GetEnvironmentVariable`, so a redirected profile root does not inherit the host's overrides.
+
+| Variable | Provider id | Session file |
+|---|---|---|
+| `CLAUDE_CONFIG_DIR` | `claude-code` | `%CLAUDE_CONFIG_DIR%\.credentials.json` |
+| `CODEX_HOME` | `codex`, `codex-spark` | `%CODEX_HOME%\auth.json` |
+| `GROK_HOME` | `grok` | `%GROK_HOME%\auth.json` |
+
+The variable must be visible to the Monitor process; a scheduled task picks up a User-scope change on its next start.
+
 Persisted keys (`JsonConfigLoader.BuildConfigEntries`): later unique **auth** file wins. `GetAuthFilePath()` is `%USERPROFILE%\.opencode\auth.json`, which is also the first legacy OpenCode path, so de-dup keeps it first. Remaining unique order: `%USERPROFILE%\.config\opencode\auth.json`, `%APPDATA%\opencode\auth.json`, `%LOCALAPPDATA%\opencode\auth.json`, `%USERPROFILE%\.local\share\opencode\auth.json`, then `%LOCALAPPDATA%\AIUsageTracker\providers.json` (fills empty keys only; `IsAuthFile=false`), then `%LOCALAPPDATA%\AIUsageTracker\auth.json`.
 
 `TokenDiscoveryService.DiscoverTokensAsync` then fills keys: env, Kilo, Roo, then session files (`AddOrUpdate` overwrites). Fetch-time `ProviderDiscoveryService.DiscoverAuthAsync` returns the first hit: env before session files.

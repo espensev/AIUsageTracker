@@ -51,6 +51,7 @@ public class GrokProvider : ProviderBase
         BadgeInitial = "G",
         AuthIdentityCandidatePathTemplates = new[]
         {
+            "%GROK_HOME%\\auth.json",
             "%USERPROFILE%\\.grok\\auth.json",
         },
         SessionAuthFileSchemas = new[]

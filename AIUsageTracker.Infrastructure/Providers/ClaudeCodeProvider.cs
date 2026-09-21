@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Core.Providers;
+using AIUsageTracker.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AIUsageTracker.Infrastructure.Providers;
@@ -49,6 +50,7 @@ public class ClaudeCodeProvider : ProviderBase
         BadgeInitial = "C",
         AuthIdentityCandidatePathTemplates = new[]
         {
+            "%CLAUDE_CONFIG_DIR%\\.credentials.json",
             "%USERPROFILE%\\.claude\\.credentials.json",
         },
         SessionAuthFileSchemas = new[]
@@ -240,19 +242,16 @@ public class ClaudeCodeProvider : ProviderBase
     }
 
     /// <summary>
-    /// Re-reads the OAuth access token from ~/.claude/.credentials.json.
+    /// Re-reads the OAuth access token from the Claude Code CLI credentials file
+    /// (<c>%CLAUDE_CONFIG_DIR%</c> when set, otherwise ~/.claude/.credentials.json).
     /// The Claude Code CLI refreshes this file when the token expires.
     /// </summary>
     private string? ReadFreshOAuthToken()
     {
         try
         {
-            var credentialsPath = this._credentialsFilePath ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".claude",
-                ".credentials.json");
-
-            if (!File.Exists(credentialsPath))
+            var credentialsPath = this.GetCredentialsFileCandidates().FirstOrDefault(File.Exists);
+            if (credentialsPath == null)
             {
                 return null;
             }
@@ -286,6 +285,22 @@ public class ClaudeCodeProvider : ProviderBase
         {
             this._logger.LogDebug(ex, "Failed to re-read OAuth token from credentials file");
             return null;
+        }
+    }
+
+    private IEnumerable<string> GetCredentialsFileCandidates()
+    {
+        if (!string.IsNullOrWhiteSpace(this._credentialsFilePath))
+        {
+            yield return this._credentialsFilePath;
+            yield break;
+        }
+
+        var discoverySpec = StaticDefinition.CreateAuthDiscoverySpec();
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var path in ProviderAuthCandidatePathResolver.ResolvePaths(discoverySpec, userProfile))
+        {
+            yield return path;
         }
     }
 
