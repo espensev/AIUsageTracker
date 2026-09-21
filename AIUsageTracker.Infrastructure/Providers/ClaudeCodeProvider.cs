@@ -28,11 +28,13 @@ public class ClaudeCodeProvider : ProviderBase
 
     private readonly ILogger<ClaudeCodeProvider> _logger;
     private readonly HttpClient _httpClient;
+    private readonly string? _credentialsFilePath;
 
-    public ClaudeCodeProvider(ILogger<ClaudeCodeProvider> logger, HttpClient httpClient)
+    public ClaudeCodeProvider(ILogger<ClaudeCodeProvider> logger, HttpClient httpClient, string? credentialsFilePath = null)
     {
         this._logger = logger;
         this._httpClient = httpClient;
+        this._credentialsFilePath = credentialsFilePath;
     }
 
     public static ProviderDefinition StaticDefinition { get; } = new(
@@ -77,8 +79,11 @@ public class ClaudeCodeProvider : ProviderBase
 
         var providerLabel = ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId);
 
-        // Check if API key is configured
-        if (string.IsNullOrEmpty(config.ApiKey))
+        // Claude Code quotas belong to the current CLI session. A legacy key in
+        // shared provider configuration must not hide a valid native OAuth token.
+        var nativeToken = this.ReadFreshOAuthToken();
+        var effectiveApiKey = nativeToken ?? config.ApiKey;
+        if (string.IsNullOrEmpty(effectiveApiKey))
         {
             return new[]
             {
@@ -95,20 +100,7 @@ public class ClaudeCodeProvider : ProviderBase
             };
         }
 
-        // Re-read the credentials file to get the freshest OAuth token.
-        // The Claude Code CLI refreshes the token periodically and writes it back
-        // to .credentials.json. Using the stale config.ApiKey would fail once the
-        // token expires (typically within 1 hour).
-        var effectiveApiKey = config.ApiKey;
         var isOAuthToken = effectiveApiKey.StartsWith("sk-ant-oat", StringComparison.Ordinal);
-        if (isOAuthToken)
-        {
-            var freshToken = this.ReadFreshOAuthToken();
-            if (!string.IsNullOrEmpty(freshToken))
-            {
-                effectiveApiKey = freshToken;
-            }
-        }
 
         // Try OAuth usage endpoint first (for subscription users)
         var failureStatus = 0;
@@ -117,6 +109,14 @@ public class ClaudeCodeProvider : ProviderBase
             var (oauthUsages, oauthFailureStatus) = await this.TryGetUsageFromOAuthAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
             if (oauthUsages != null)
             {
+                if (nativeToken != null)
+                {
+                    foreach (var usage in oauthUsages)
+                    {
+                        usage.AuthSource = "Claude Code CLI session auth";
+                    }
+                }
+
                 return oauthUsages;
             }
 
@@ -152,7 +152,9 @@ public class ClaudeCodeProvider : ProviderBase
 
         // Neither source answered. Report that rather than shelling out to the claude CLI:
         // it has no usage subcommand, so "claude usage" starts a full agent session.
-        return new[] { this.CreateUsageUnavailable(failureStatus, providerLabel) };
+        var unavailable = this.CreateUsageUnavailable(failureStatus, providerLabel);
+        unavailable.AuthSource = nativeToken != null ? "Claude Code CLI session auth" : config.AuthSource;
+        return new[] { unavailable };
     }
 
     /// <summary>
@@ -245,7 +247,7 @@ public class ClaudeCodeProvider : ProviderBase
     {
         try
         {
-            var credentialsPath = Path.Combine(
+            var credentialsPath = this._credentialsFilePath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ".claude",
                 ".credentials.json");
@@ -258,12 +260,15 @@ public class ClaudeCodeProvider : ProviderBase
             var json = File.ReadAllText(credentialsPath);
             using var doc = JsonDocument.Parse(json);
 
-            if (!doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth))
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth) ||
+                oauth.ValueKind != JsonValueKind.Object)
             {
                 return null;
             }
 
-            if (!oauth.TryGetProperty("accessToken", out var tokenElement))
+            if (!oauth.TryGetProperty("accessToken", out var tokenElement) ||
+                tokenElement.ValueKind != JsonValueKind.String)
             {
                 return null;
             }
