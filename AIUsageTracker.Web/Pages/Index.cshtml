@@ -42,12 +42,8 @@
                 .ToList();
             var visibleFamilies = IndexModel.ProjectProviderFamilies(visibleUsage);
             var attentionUsage = Model.ShowInactiveProviders
-                ? new List<AIUsageTracker.Core.Models.ProviderUsage>()
-                : allUsage
-                    .Where(u => !u.IsAvailable)
-                    .GroupBy(u => u.ProviderId, StringComparer.OrdinalIgnoreCase)
-                    .Select(g => g.First())
-                    .ToList();
+                ? Array.Empty<AIUsageTracker.Core.Models.ProviderUsage>()
+                : IndexModel.ProjectProviderAttention(allUsage);
 
             var currencyProviders = visibleUsage
                 .OfType<QuotaProviderUsage>()
