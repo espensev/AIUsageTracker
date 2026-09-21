@@ -58,6 +58,13 @@ public class ConfigService : IConfigService
             }
 
             var configs = (await this._configLoader.LoadConfigAsync().ConfigureAwait(false)).ToList();
+            var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
+            var suppressed = new HashSet<string>(prefs.SuppressedProviderIds, StringComparer.OrdinalIgnoreCase);
+            configs = configs
+                .Where(config =>
+                    !suppressed.Contains(config.ProviderId) &&
+                    !suppressed.Contains(ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId)))
+                .ToList();
             this.LogAuthDiagnosticsSnapshotOnceOnStartup(configs);
             Volatile.Write(ref this._cachedConfigs, configs);
             return configs;
@@ -174,6 +181,7 @@ public class ConfigService : IConfigService
         {
             await this._configLoader.SavePreferencesAsync(preferences).ConfigureAwait(false);
             Volatile.Write<AppPreferences?>(ref this._cachedPreferences, null);
+            Volatile.Write<IReadOnlyList<ProviderConfig>?>(ref this._cachedConfigs, null);
             this._logger.LogInformation("Prefs saved");
         }
         catch (Exception ex)

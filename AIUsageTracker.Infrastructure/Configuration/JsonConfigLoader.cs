@@ -39,19 +39,6 @@ public class JsonConfigLoader : IConfigLoader
 
         await this.ApplyDiscoveredTokensAsync(result).ConfigureAwait(false);
 
-        var preferences = await JsonConfigFileStore.ReadJsonElementMapAsync(
-            this.GetPreferencesPath(), this._logger).ConfigureAwait(false);
-        if (preferences != null &&
-            preferences.TryGetValue(nameof(AppPreferences.SuppressedProviderIds), out var suppressed) &&
-            suppressed.ValueKind == JsonValueKind.Array)
-        {
-            var suppressedIds = suppressed.EnumerateArray()
-                .Where(value => value.ValueKind == JsonValueKind.String)
-                .Select(value => value.GetString())
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            result.RemoveAll(config => suppressedIds.Contains(config.ProviderId));
-        }
-
         return result;
     }
 

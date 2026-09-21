@@ -13,7 +13,7 @@ namespace AIUsageTracker.Tests.Infrastructure;
 public class ConfigLoaderTests : IntegrationTestBase
 {
     [Fact]
-    public async Task LoadConfigAsync_SuppressedProviders_StayRemovedAcrossLoadsWithoutDeletingCredentialsAsync()
+    public async Task LoadConfigAsync_SuppressedProviders_RemainOnDiskAndInTheLoaderListAsync()
     {
         var authJson = "{\"opencode-zen\":{\"key\":\"saved-key\"},\"groq\":{\"key\":\"retained-key\"}}";
         var authPath = this.CreateFile("config/auth.json", authJson);
@@ -31,19 +31,10 @@ public class ConfigLoaderTests : IntegrationTestBase
         paths.Setup(p => p.GetAppDataRoot()).Returns(Path.Combine(this.TestRootPath, "appdata"));
         var loader = new JsonConfigLoader(pathProvider: paths.Object);
 
-        for (var attempt = 0; attempt < 2; attempt++)
-        {
-            var configs = await loader.LoadConfigAsync();
-            Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
-            Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "claude-code", StringComparison.Ordinal));
-            Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
-        }
-
+        var configs = await loader.LoadConfigAsync();
+        Assert.Contains(configs, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+        Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
         Assert.Equal(authJson, await File.ReadAllTextAsync(authPath));
-        await File.WriteAllTextAsync(preferencesPath, "{}");
-        var restored = await loader.LoadConfigAsync();
-        Assert.Contains(restored, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
-        Assert.Contains(restored, config => string.Equals(config.ProviderId, "claude-code", StringComparison.Ordinal));
     }
 
     [Fact]

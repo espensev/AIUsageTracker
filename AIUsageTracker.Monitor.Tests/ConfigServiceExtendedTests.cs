@@ -174,6 +174,35 @@ public sealed class ConfigServiceExtendedTests : IDisposable
         Assert.Contains("antigravity", loaded.SuppressedProviderIds);
     }
 
+    [Fact]
+    public async Task GetConfigsAsync_OmitsSuppressedProvidersWithoutDeletingCredentialsAsync()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "auth.json"),
+            "{\"opencode-zen\":{\"key\":\"saved-key\"},\"groq\":{\"key\":\"retained-key\"}}");
+        await this.WriteProvidersJsonAsync("{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "prefs.json"),
+            "{\"SuppressedProviderIds\":[\"OPENCODE-ZEN\"]}");
+
+        var configs = await this._service.GetConfigsAsync();
+        Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+        Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+
+        await this._service.SaveConfigAsync(new ProviderConfig
+        {
+            ProviderId = "groq",
+            ApiKey = "retained-key",
+        });
+
+        var authJson = await File.ReadAllTextAsync(Path.Combine(this._tempDir, "auth.json"));
+        Assert.Contains("saved-key", authJson, StringComparison.Ordinal);
+
+        await this._service.SavePreferencesAsync(new AppPreferences());
+        var restored = await this._service.GetConfigsAsync();
+        Assert.Contains(restored, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+    }
+
 #pragma warning disable MA0004
     private async Task WriteProvidersJsonAsync(object data)
     {

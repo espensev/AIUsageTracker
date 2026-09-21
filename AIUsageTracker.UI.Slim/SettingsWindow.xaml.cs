@@ -863,10 +863,7 @@ public partial class SettingsWindow : Window
 
         this._monitorService.InvalidateGroupedUsageCache();
 
-        if (removedProviderIds.Count > 0)
-        {
-            await this._preferencesStore.SaveAsync(this._preferences).ConfigureAwait(true);
-        }
+        await this._preferencesStore.SaveAsync(this._preferences).ConfigureAwait(true);
 
         if (removedProviderIds.Count > 0)
         {
