@@ -2,6 +2,7 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -110,7 +111,7 @@ public class MonitorLauncher
             };
         }
 
-        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && metadataState.ProcessRunning)
+        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && metadataState.ProcessRunning != false)
         {
             return new MonitorAgentStatus
             {
@@ -335,7 +336,7 @@ public class MonitorLauncher
             return new MonitorReadyState(metadataState.EffectivePort, IsRunning: false, FromMetadata: false, StartupFailure: startupFailure);
         }
 
-        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && metadataState.ProcessRunning)
+        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && metadataState.ProcessRunning != false)
         {
             return new MonitorReadyState(metadataState.EffectivePort, IsRunning: false, FromMetadata: false, IsStarting: true);
         }
@@ -465,12 +466,15 @@ public class MonitorLauncher
         var processRunning = await this.CheckProcessRunningAsync(info.ProcessId).ConfigureAwait(false);
         var startupStatus = GetStartupStatus(info.Errors);
 
-        if (healthOk && processRunning)
+        // A scheduled-task process can be inaccessible from an interactive session.
+        // Keep its metadata (including the access token) when liveness is unknown;
+        // only a successful health check can make that metadata usable.
+        if (processRunning == null || (healthOk && processRunning == true))
         {
             return new MonitorMetadataState(info, path, healthOk, processRunning);
         }
 
-        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && processRunning)
+        if (string.Equals(startupStatus, StatusStarting, StringComparison.OrdinalIgnoreCase) && processRunning == true)
         {
             this._logger?.LogDebug("Monitor metadata indicates startup is still in progress.");
             return new MonitorMetadataState(info, path, healthOk, processRunning);
@@ -479,7 +483,7 @@ public class MonitorLauncher
         // Don't quarantine metadata that reports a startup failure while the process is still alive —
         // the failure IS the current state and callers need to read it.
         var startupFailure = GetStartupFailure(info.Errors);
-        if (!string.IsNullOrWhiteSpace(startupFailure) && processRunning)
+        if (!string.IsNullOrWhiteSpace(startupFailure) && processRunning == true)
         {
             return new MonitorMetadataState(info, path, healthOk, processRunning);
         }
@@ -572,32 +576,37 @@ public class MonitorLauncher
         }
     }
 
-    private Task<bool> CheckProcessRunningAsync(int processId)
+    private async Task<bool?> CheckProcessRunningAsync(int processId)
     {
-        if (this._processRunningOverride != null)
-        {
-            return this._processRunningOverride(processId);
-        }
-
-        if (processId <= 0)
-        {
-            return Task.FromResult(false);
-        }
-
         try
         {
-            var process = Process.GetProcessById(processId);
-            return Task.FromResult(!process.HasExited);
+            if (this._processRunningOverride != null)
+            {
+                return await this._processRunningOverride(processId).ConfigureAwait(false);
+            }
+
+            if (processId <= 0)
+            {
+                return false;
+            }
+
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (Exception ex) when (ex is Win32Exception { NativeErrorCode: 5 } or UnauthorizedAccessException)
+        {
+            this._logger?.LogDebug(ex, "Access denied querying monitor process {ProcessId}; liveness is unknown.", processId);
+            return null;
         }
         catch (ArgumentException ex)
         {
             this._logger?.LogDebug(ex, "Monitor process {ProcessId} was not found.", processId);
-            return Task.FromResult(false);
+            return false;
         }
         catch (InvalidOperationException ex)
         {
             this._logger?.LogDebug(ex, "Failed to query monitor process {ProcessId}.", processId);
-            return Task.FromResult(false);
+            return false;
         }
     }
 
@@ -645,9 +654,9 @@ public class MonitorLauncher
         MonitorInfo? Info,
         string? Path,
         bool HealthOk,
-        bool ProcessRunning)
+        bool? ProcessRunning)
     {
-        public bool IsUsable => this.Info != null && this.HealthOk && this.ProcessRunning;
+        public bool IsUsable => this.Info != null && this.HealthOk && this.ProcessRunning != false;
 
         public int EffectivePort => this.Info?.Port > 0 ? this.Info.Port : DefaultPort;
     }
