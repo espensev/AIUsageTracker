@@ -13,6 +13,40 @@ namespace AIUsageTracker.Tests.Infrastructure;
 public class ConfigLoaderTests : IntegrationTestBase
 {
     [Fact]
+    public async Task LoadConfigAsync_SuppressedProviders_StayRemovedAcrossLoadsWithoutDeletingCredentialsAsync()
+    {
+        var authJson = "{\"opencode-zen\":{\"key\":\"saved-key\"},\"groq\":{\"key\":\"retained-key\"}}";
+        var authPath = this.CreateFile("config/auth.json", authJson);
+        var providersPath = this.CreateFile("config/providers.json", "{}");
+        var preferencesPath = this.CreateFile(
+            "config/preferences.json",
+            "{\"SuppressedProviderIds\":[\"OPENCODE-ZEN\",\"CLAUDE-CODE\"]}");
+        this.CreateFile("home/.claude/.credentials.json", "{\"claudeAiOauth\":{\"accessToken\":\"native-test-token\"}}");
+
+        var paths = new Mock<IAppPathProvider>();
+        paths.Setup(p => p.GetAuthFilePath()).Returns(authPath);
+        paths.Setup(p => p.GetProviderConfigFilePath()).Returns(providersPath);
+        paths.Setup(p => p.GetPreferencesFilePath()).Returns(preferencesPath);
+        paths.Setup(p => p.GetUserProfileRoot()).Returns(Path.Combine(this.TestRootPath, "home"));
+        paths.Setup(p => p.GetAppDataRoot()).Returns(Path.Combine(this.TestRootPath, "appdata"));
+        var loader = new JsonConfigLoader(pathProvider: paths.Object);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var configs = await loader.LoadConfigAsync();
+            Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+            Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "claude-code", StringComparison.Ordinal));
+            Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+        }
+
+        Assert.Equal(authJson, await File.ReadAllTextAsync(authPath));
+        await File.WriteAllTextAsync(preferencesPath, "{}");
+        var restored = await loader.LoadConfigAsync();
+        Assert.Contains(restored, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+        Assert.Contains(restored, config => string.Equals(config.ProviderId, "claude-code", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task LoadConfigAsync_PreservesConfiguredProviderAliasIdsAsync()
     {
         var priorKimiValue = Environment.GetEnvironmentVariable("KIMI_API_KEY");
