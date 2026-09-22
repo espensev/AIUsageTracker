@@ -13,6 +13,7 @@
 | [environment_variables.md](environment_variables.md) | Discovery env vars |
 | [reviews/review-2026-09-21-cli-home-auth.md](reviews/review-2026-09-21-cli-home-auth.md) | CLI home/auth fix review and targeted validation |
 | [release-process.md](release-process.md) | Beta/stable tags |
+| [local-stack.md](local-stack.md) | Always-on Monitor + Web via scheduled tasks (`scripts/local-stack.ps1`) |
 | [test_fixture_sync.md](test_fixture_sync.md) | Fixture rules |
 | [wpf_async_best_practices.md](wpf_async_best_practices.md) | UI async |
 | [adr/](adr/) | Accepted decisions still in force |

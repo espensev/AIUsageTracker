@@ -9,6 +9,8 @@
 
 - **CLI home overrides in session discovery** — `GROK_HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` are now honored ahead of the profile default, so a relocated CLI home no longer leaves the provider on a stale stored token (Grok surfaced this as a persistent 401). Auth path templates accept any `%NAME%` token; an unset variable drops that candidate. Claude Code's per-refresh credential re-read now uses the same candidate list instead of a hardcoded `~/.claude` path. See `docs/environment_variables.md`.
 
+- **`scripts/local-stack.ps1`** — publishes the Monitor + Web pair into a release directory, points the scheduled tasks at it, restarts them in a safe order (Web down, Monitor down, swap, Monitor up, Web up) and verifies the dashboard; `-Action status` inspects the running stack. See `docs/local-stack.md`.
+
 ### Fixed
 
 - **Dashboard summary ignores suppressed providers** — the provider count and average usage on the Web dashboard no longer include providers listed in `SuppressedProviderIds`, matching the card filter.
