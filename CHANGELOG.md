@@ -9,6 +9,10 @@
 
 - **CLI home overrides in session discovery** — `GROK_HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` are now honored ahead of the profile default, so a relocated CLI home no longer leaves the provider on a stale stored token (Grok surfaced this as a persistent 401). Auth path templates accept any `%NAME%` token; an unset variable drops that candidate. Claude Code's per-refresh credential re-read now uses the same candidate list instead of a hardcoded `~/.claude` path. See `docs/environment_variables.md`.
 
+### Fixed
+
+- **Dashboard summary ignores suppressed providers** — the provider count and average usage on the Web dashboard no longer include providers listed in `SuppressedProviderIds`, matching the card filter.
+
 ### Security
 
 - **Monitor loopback API secured with bearer auth (contract v2)** — the `/api/*` endpoints now require `Authorization: Bearer <token>` using the ACL-protected access token stored in `monitor.json` (`MonitorInfoPersistence.AclToken`). `/api/health` remains unauthenticated. The API contract version has been bumped from 1 to 2 (`MonitorApiContract.Version`). Provider configuration responses are redacted via the new `ProviderConfigResponse` DTO — `api_key` and other secrets are no longer returned to API consumers. The `/hubs/usage` SignalR hub is authenticated via `Authorization: Bearer <token>` header or `access_token` query parameter.

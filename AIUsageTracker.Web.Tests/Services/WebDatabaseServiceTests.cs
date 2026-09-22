@@ -106,6 +106,33 @@ public class WebDatabaseServiceTests
     }
 
     [TestMethod]
+    public async Task GetUsageSummaryAsync_ExcludesSuppressedProvidersAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var summary = await service.GetUsageSummaryAsync(new[] { "claude" });
+
+        Assert.AreEqual(1, summary.ProviderCount);
+        Assert.AreEqual(10, summary.AverageUsage, 0.001);
+    }
+
+    [TestMethod]
+    public async Task GetUsageSummaryAsync_DoesNotServeUnfilteredCacheToFilteredCallAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var unfiltered = await service.GetUsageSummaryAsync();
+        var filtered = await service.GetUsageSummaryAsync(new[] { "openai" });
+
+        Assert.AreEqual(2, unfiltered.ProviderCount);
+        Assert.AreEqual(1, filtered.ProviderCount);
+    }
+
+    [TestMethod]
     public async Task GetProvidersAsync_WhenDatabaseMissing_ReturnsEmptyListAsync()
     {
         var databasePath = Path.Combine(this._tempDirectory, "missing.db");

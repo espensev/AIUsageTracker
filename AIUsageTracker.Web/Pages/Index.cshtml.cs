@@ -194,7 +194,7 @@ public class IndexModel : PageModel
         }
 
         var latestUsageTask = this._dbService.GetLatestUsageAsync(includeInactive: true);
-        var summaryTask = this._dbService.GetUsageSummaryAsync();
+        var summaryTask = this._dbService.GetUsageSummaryAsync(this._suppressedProviderIds);
 
         await Task.WhenAll(latestUsageTask, summaryTask).ConfigureAwait(false);
 

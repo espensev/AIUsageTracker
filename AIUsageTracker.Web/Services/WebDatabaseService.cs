@@ -7,6 +7,7 @@ using System.Globalization;
 
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
 
 using Dapper;
 
@@ -35,7 +36,7 @@ public class WebDatabaseService : IWebDatabaseRepository
             WHERE p.is_active = 1";
 
     private const string UsageSummarySql = @"
-            SELECT 
+            SELECT
                 COUNT(DISTINCT provider_id) as ProviderCount,
                 AVG(requests_percentage) as AverageUsage,
                 MAX(fetched_at) as LastUpdate
@@ -43,6 +44,21 @@ public class WebDatabaseService : IWebDatabaseRepository
             WHERE id IN (
                 SELECT MAX(id) FROM provider_history GROUP BY provider_id
             )";
+
+    private const string UsageSummaryExcludingProvidersSql = @"
+            SELECT
+                COUNT(DISTINCT provider_id) as ProviderCount,
+                AVG(requests_percentage) as AverageUsage,
+                MAX(fetched_at) as LastUpdate
+            FROM provider_history
+            WHERE id IN (
+                SELECT MAX(id) FROM provider_history GROUP BY provider_id
+            )
+            AND provider_id NOT IN @ExcludedProviderIds";
+
+    private const string HistoryProviderIdsSql = @"
+            SELECT DISTINCT provider_id
+            FROM provider_history";
 
     private const string HistorySamplesSql = @"
             WITH normalized AS (
@@ -226,9 +242,29 @@ public class WebDatabaseService : IWebDatabaseRepository
             connection => connection.QueryAsync<dynamic>(WebDatabaseQueryBuilder.BuildProviderHistoryQuery(limit), new { ProviderId = providerId })).ConfigureAwait(false);
     }
 
-    public async Task<UsageSummary> GetUsageSummaryAsync()
+    public Task<UsageSummary> GetUsageSummaryAsync()
     {
-        var cacheKey = "db:usage-summary";
+        return this.GetUsageSummaryAsync(Array.Empty<string>());
+    }
+
+    /// <summary>
+    /// Summarizes the latest history row per provider, leaving out providers whose owner id
+    /// is in <paramref name="excludedProviderIds"/> (the dashboard passes the suppressed set).
+    /// </summary>
+    public async Task<UsageSummary> GetUsageSummaryAsync(IReadOnlyCollection<string> excludedProviderIds)
+    {
+        ArgumentNullException.ThrowIfNull(excludedProviderIds);
+
+        var excludedOwnerIds = excludedProviderIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var cacheKey = excludedOwnerIds.Count == 0
+            ? "db:usage-summary"
+            : "db:usage-summary:exclude:" + string.Join(",", excludedOwnerIds).ToUpperInvariant();
         if (this._cache.TryGetValue<UsageSummary>(cacheKey, out var cached) && cached != null)
         {
             return cached;
@@ -242,7 +278,7 @@ public class WebDatabaseService : IWebDatabaseRepository
         var sw = Stopwatch.StartNew();
 
         var result = await this.QuerySingleIfDatabaseAvailableAsync(
-            connection => connection.QuerySingleOrDefaultAsync<UsageSummary>(UsageSummarySql),
+            connection => QueryUsageSummaryAsync(connection, excludedOwnerIds),
             new UsageSummary()).ConfigureAwait(false);
         this._cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
         this._logger.LogInformation(
@@ -250,6 +286,34 @@ public class WebDatabaseService : IWebDatabaseRepository
             result.ProviderCount,
             sw.ElapsedMilliseconds);
         return result;
+    }
+
+    private static async Task<UsageSummary?> QueryUsageSummaryAsync(
+        SqliteConnection connection,
+        IReadOnlyCollection<string> excludedOwnerIds)
+    {
+        if (excludedOwnerIds.Count == 0)
+        {
+            return await connection.QuerySingleOrDefaultAsync<UsageSummary>(UsageSummarySql).ConfigureAwait(false);
+        }
+
+        // History rows carry card/sub-provider ids; map each to its owner so a suppressed
+        // owner takes all of its rows out of the summary, matching the dashboard card filter.
+        var excludedOwners = new HashSet<string>(excludedOwnerIds, StringComparer.OrdinalIgnoreCase);
+        var historyProviderIds = await connection.QueryAsync<string>(HistoryProviderIdsSql).ConfigureAwait(false);
+        var excludedHistoryIds = historyProviderIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Where(id => excludedOwners.Contains(id) || excludedOwners.Contains(ProviderMetadataCatalog.GetProviderOwnerId(id)))
+            .ToList();
+
+        if (excludedHistoryIds.Count == 0)
+        {
+            return await connection.QuerySingleOrDefaultAsync<UsageSummary>(UsageSummarySql).ConfigureAwait(false);
+        }
+
+        return await connection.QuerySingleOrDefaultAsync<UsageSummary>(
+            UsageSummaryExcludingProvidersSql,
+            new { ExcludedProviderIds = excludedHistoryIds }).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<ProviderUsage>> GetHistorySamplesAsync(IEnumerable<string> providerIds, int lookbackHours, int maxSamples)
