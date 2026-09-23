@@ -38,7 +38,8 @@ public class Program
             return 1;
         }
 
-        return SeedDatabase(seedPath);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return SeedDatabase(seedPath, Path.Combine(appData, "AIUsageTracker", "usage.db"));
     }
 
     private static string? ValidateFixturePath(string relativePath)
@@ -304,12 +305,9 @@ public class Program
         Console.WriteLine($"  7-day history: {fixture.History7Days.Count}");
     }
 
-    private static int SeedDatabase(string fixturePath)
+    public static int SeedDatabase(string fixturePath, string dbPath)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dbDir = Path.Combine(appData, "AIUsageTracker");
-        Directory.CreateDirectory(dbDir);
-        var dbPath = Path.Combine(dbDir, "usage.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
 
         if (File.Exists(dbPath))
         {
@@ -337,7 +335,12 @@ public class Program
 
         Console.WriteLine($"Fixture contains {fixture.Providers.Count} providers");
 
-        var connectionString = $"Data Source={dbPath}";
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Pooling = false,
+            ForeignKeys = true,
+        }.ToString();
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
 
@@ -428,6 +431,15 @@ public class Program
         var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
         foreach (var history in historyToInsert)
         {
+            // Exported history can outlive its provider metadata. Preserve those rows
+            // without presenting a history-only provider as actively configured.
+            connection.Execute(
+                @"
+                INSERT INTO providers (provider_id, provider_name, is_active)
+                VALUES (@Id, @Id, 0)
+                ON CONFLICT(provider_id) DO NOTHING",
+                new { Id = history.ProviderId });
+
             connection.Execute(
                 @"
                 INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage, is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms)
