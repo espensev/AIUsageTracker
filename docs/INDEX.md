@@ -11,6 +11,7 @@
 | [cli_documentation.md](cli_documentation.md) | `act` commands |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layers, ports, schema |
 | [environment_variables.md](environment_variables.md) | Discovery env vars |
+| [reviews/review-2026-09-21-cli-home-auth.md](reviews/review-2026-09-21-cli-home-auth.md) | CLI home/auth fix review and targeted validation |
 | [release-process.md](release-process.md) | Beta/stable tags |
 | [test_fixture_sync.md](test_fixture_sync.md) | Fixture rules |
 | [wpf_async_best_practices.md](wpf_async_best_practices.md) | UI async |

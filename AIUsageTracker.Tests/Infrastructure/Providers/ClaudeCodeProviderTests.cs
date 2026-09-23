@@ -3,23 +3,31 @@
 // </copyright>
 
 using System.Net;
+using System.Text.Json;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Infrastructure.Providers;
+using Moq;
 using Moq.Protected;
 
 namespace AIUsageTracker.Tests.Infrastructure.Providers;
 
-public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>
+public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>, IDisposable
 {
     private static readonly string TestApiKey = Guid.NewGuid().ToString();
 
     private readonly ClaudeCodeProvider _provider;
+    private readonly string _testDirectory;
+    private readonly string _credentialsPath;
 
     public ClaudeCodeProviderTests()
     {
-        this._provider = new ClaudeCodeProvider(this.Logger.Object, this.HttpClient);
+        this._testDirectory = TestTempPaths.CreateDirectory("claude-code-provider");
+        this._credentialsPath = Path.Combine(this._testDirectory, ".credentials.json");
+        this._provider = new ClaudeCodeProvider(this.Logger.Object, this.HttpClient, this._credentialsPath);
         this.Config.ApiKey = TestApiKey;
     }
+
+    public void Dispose() => TestTempPaths.CleanupPath(this._testDirectory);
 
     /// <summary>
     /// Tests parsing of a typical OAuth usage response with moderate usage.
@@ -495,6 +503,61 @@ public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>
         Assert.False(usage.IsAvailable);
         Assert.Equal(ProviderUsageState.Error, usage.State);
         Assert.Equal(403, usage.HttpStatus);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("configured-api-key")]
+    [InlineData("sk-ant-oat-stale-token")]
+    public async Task GetUsageAsync_NativeSessionPresent_UsesCurrentOAuthTokenWithoutApiProbeAsync(string configuredKey)
+    {
+        var nativeToken = $"sk-ant-oat-{Guid.NewGuid():N}";
+        await File.WriteAllTextAsync(
+            this._credentialsPath,
+            JsonSerializer.Serialize(new { claudeAiOauth = new { accessToken = nativeToken } }));
+        this.Config.ApiKey = configuredKey;
+        this.SetupOAuthResponse(HttpStatusCode.Forbidden, "{}");
+        this.SetupMessagesResponse(HttpStatusCode.Unauthorized, "{}");
+
+        var usage = (await this._provider.GetUsageAsync(this.Config)).Single();
+
+        Assert.Equal(403, usage.HttpStatus);
+        Assert.Equal("Claude Code CLI session auth", usage.AuthSource);
+        this.MessageHandler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.Is<HttpRequestMessage>(request =>
+                request.RequestUri!.ToString() == ClaudeCodeProvider.OAuthUsageEndpoint &&
+                request.Headers.Authorization!.Parameter == nativeToken),
+            ItExpr.IsAny<CancellationToken>());
+        this.MessageHandler.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.Is<HttpRequestMessage>(request => request.Method == HttpMethod.Post),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("{\"claudeAiOauth\":{\"accessToken\":123}}")]
+    [InlineData("invalid-json")]
+    public async Task GetUsageAsync_UnusableNativeSession_PreservesConfiguredKeyFallbackAsync(string credentials)
+    {
+        await File.WriteAllTextAsync(this._credentialsPath, credentials);
+        this.SetupOAuthResponse(HttpStatusCode.Forbidden, "{}");
+        this.SetupMessagesResponse(HttpStatusCode.Unauthorized, "{}");
+
+        var usage = (await this._provider.GetUsageAsync(this.Config)).Single();
+
+        Assert.Equal(401, usage.HttpStatus);
+        this.MessageHandler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.Is<HttpRequestMessage>(request =>
+                request.RequestUri!.ToString() == ClaudeCodeProvider.OAuthUsageEndpoint &&
+                request.Headers.Authorization!.Parameter == this.Config.ApiKey),
+            ItExpr.IsAny<CancellationToken>());
     }
 
     [Fact]

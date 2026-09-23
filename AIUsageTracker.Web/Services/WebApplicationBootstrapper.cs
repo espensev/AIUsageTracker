@@ -21,7 +21,7 @@ internal static class WebApplicationBootstrapper
             typeof(AIUsageTracker.Infrastructure.Extensions.ProviderRegistrationExtensions).Assembly);
         builder.Services.AddWebUiDataProtection(builder.Environment, runtimePaths.DataProtectionKeyDirectory);
         builder.Services.AddWebUiInfrastructure();
-        builder.Services.AddAIUsageTrackerWebServices(runtimePaths.DatabasePath);
+        builder.Services.AddAIUsageTrackerWebServices(runtimePaths.DatabasePath, localAppDataRoot);
 
         var app = builder.Build();
         app.ConfigureWebUi();
