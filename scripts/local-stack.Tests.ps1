@@ -1,4 +1,4 @@
-# Pester tests for the pure helpers in local-stack.ps1.
+# Pester tests for helpers and mocked system boundaries in local-stack.ps1.
 # Run: pwsh -NoProfile -Command "Invoke-Pester -Path scripts/local-stack.Tests.ps1"
 
 BeforeAll {
@@ -136,5 +136,167 @@ Describe 'ConvertTo-StackRollbackCommand' {
     It 'omits the argument clause when there are no arguments' {
         $line = ConvertTo-StackRollbackCommand -TaskPath '\Sevnet\AIUsageTracker\' -TaskName 'Monitor' -ReleaseDirectory 'C:\r\prev' -ExecutableName 'AIUsageTracker.Monitor.exe' -Arguments ''
         $line | Should -Not -Match '-Argument'
+    }
+}
+
+Describe 'Deployment identity gate' {
+    BeforeEach {
+        Mock Write-Detail {}
+        Mock Test-Path { $true }
+        Mock Invoke-StackInstalledVerifier {
+            [pscustomobject]@{
+                status = 'VERIFIED'
+                machineId = 'snd-desk'
+                instanceId = 'ca96d510-7d87-4cec-8e1a-bd8fc3866903'
+                computerName = 'fixture-host'
+            }
+        }
+    }
+
+    It 'refuses an absent installed verifier' {
+        Mock Test-Path { $false }
+        { Invoke-StackIdentityGate } | Should -Throw '*verifier*'
+        Should -Invoke Invoke-StackInstalledVerifier -Times 0 -Exactly
+    }
+
+    It 'refuses a verified identity from a different machine or instance' -ForEach @(
+        @{ MachineId = 'another-machine'; InstanceId = 'ca96d510-7d87-4cec-8e1a-bd8fc3866903' }
+        @{ MachineId = 'snd-desk'; InstanceId = '00000000-0000-0000-0000-000000000001' }
+    ) {
+        Mock Invoke-StackInstalledVerifier {
+            [pscustomobject]@{ status = 'VERIFIED'; machineId = $MachineId; instanceId = $InstanceId; computerName = 'fixture-host' }
+        }
+        { Invoke-StackIdentityGate } | Should -Throw '*identity*'
+    }
+
+    It 'requires exactly one result from the installed verifier' {
+        Mock Invoke-StackInstalledVerifier {
+            [pscustomobject]@{ status = 'VERIFIED'; machineId = 'snd-desk'; instanceId = 'ca96d510-7d87-4cec-8e1a-bd8fc3866903'; computerName = 'fixture-host' }
+            [pscustomobject]@{ status = 'UNVERIFIED' }
+        }
+        { Invoke-StackIdentityGate } | Should -Throw '*identity*'
+    }
+
+    It 'rejects incomplete or unverified results' -ForEach @(
+        @{ Result = $null }
+        @{ Result = [pscustomobject]@{ status = 'UNVERIFIED'; machineId = 'snd-desk'; instanceId = 'ca96d510-7d87-4cec-8e1a-bd8fc3866903' } }
+        @{ Result = [pscustomobject]@{ status = 'VERIFIED'; machineId = 'snd-desk' } }
+        @{ Result = 'unexpected verifier output' }
+    ) {
+        Mock Invoke-StackInstalledVerifier { $Result }
+        { Invoke-StackIdentityGate } | Should -Throw '*identity*'
+    }
+
+    It 'propagates verifier failure' {
+        Mock Invoke-StackInstalledVerifier { throw 'fixture verifier failure' }
+        { Invoke-StackIdentityGate } | Should -Throw '*fixture verifier failure*'
+    }
+
+    It 'accepts the expected machine only through the known-folder verifier' {
+        { Invoke-StackIdentityGate } | Should -Not -Throw
+        Should -Invoke Invoke-StackInstalledVerifier -Times 1 -Exactly -ParameterFilter {
+            $Path -eq (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'common_dev\v2\Test-LocalMachineIdentity.ps1')
+        }
+    }
+}
+
+Describe 'Scheduled-task registration namespace' {
+    BeforeEach {
+        Mock New-ScheduledTaskSettingsSet { [pscustomobject]@{} }
+        Mock New-ScheduledTaskPrincipal { [pscustomobject]@{} }
+        Mock New-ScheduledTaskTrigger { [pscustomobject]@{} }
+        Mock New-StackTaskAction { [pscustomobject]@{} }
+        Mock Register-ScheduledTask {} -RemoveParameterType Action, Principal, Settings, Trigger -RemoveParameterValidation Action, Principal, Settings, Trigger
+    }
+
+    It 'rejects <Folder> before any scheduler preparation or registration' -ForEach @(
+        @{ Folder = '\' }
+        @{ Folder = '\MyTasks\AIUsageTracker\' }
+        @{ Folder = '\MyTasks\' }
+        @{ Folder = '\SevGrp\' }
+        @{ Folder = '\AIUsageTracker\' }
+        @{ Folder = '\Unrelated\Service\' }
+        @{ Folder = '\Sevnet\AIUsageTracker\' }
+        @{ Folder = '\AdminTasks\AIUsageTracker\' }
+        @{ Folder = '\SevGrp\..\MyTasks\' }
+    ) {
+        { Register-StackTasks -Folder $Folder -ReleaseDirectory $TestDrive -WebArguments '--urls http://localhost:5100' } | Should -Throw '*namespace*'
+        Should -Invoke New-ScheduledTaskSettingsSet -Times 0 -Exactly
+        Should -Invoke Register-ScheduledTask -Times 0 -Exactly
+    }
+
+    It 'registers both tasks beneath the application owner folder' {
+        Register-StackTasks -Folder '\SevGrp\AIUsageTracker\' -ReleaseDirectory $TestDrive -WebArguments '--urls http://localhost:5100'
+        Should -Invoke Register-ScheduledTask -Times 2 -Exactly -ParameterFilter { $TaskPath -eq '\SevGrp\AIUsageTracker\' }
+    }
+}
+
+Describe 'Stack status without running processes' {
+    It 'returns degraded status when both processes are absent' {
+        Mock Get-StackTasks { [pscustomobject]@{ Monitor = $null; Web = $null } }
+        Mock Get-CimInstance {}
+        Mock Get-StackListenerPid { $null }
+        Mock Read-StackMonitorInfo { $null }
+        Mock Get-StackWebHttpCode { 0 }
+        Mock Get-StackWebStatus { $null }
+        Mock Write-Step {}
+        Mock Write-Detail {}
+        Mock Write-Host {}
+        Invoke-StackStatus | Should -Be 2
+    }
+}
+
+Describe 'Task namespace preflight' {
+    BeforeEach {
+        Mock Write-Step {}
+        Mock Write-Detail {}
+        Mock Get-StackGitState { [pscustomobject]@{ Sha = '1234567890'; Branch = 'fixture'; Dirty = $false } }
+        Mock Get-Command { [pscustomobject]@{} } -ParameterFilter { $Name -eq 'dotnet' }
+        Mock Invoke-StackIdentityGate {}
+        Mock Publish-StackRelease { throw 'unexpected publish' }
+        Mock Stop-StackComponent { throw 'unexpected process stop' }
+        Mock Get-StackTasks {
+            [pscustomobject]@{
+                Monitor = [pscustomobject]@{ TaskPath = '\MyTasks\AIUsageTracker\' }
+                Web = $null
+            }
+        }
+    }
+
+    It 'rejects an explicit forbidden folder before any deployment preparation' {
+        & {
+            $TaskFolder = '\'
+            { Invoke-StackDeploy } | Should -Throw '*namespace*'
+        }
+        Should -Invoke Get-StackGitState -Times 0 -Exactly
+        Should -Invoke Invoke-StackIdentityGate -Times 0 -Exactly
+        Should -Invoke Publish-StackRelease -Times 0 -Exactly
+        Should -Invoke Stop-StackComponent -Times 0 -Exactly
+    }
+
+    It 'rejects an existing forbidden task before publish or stop' {
+        { Invoke-StackDeploy } | Should -Throw '*namespace*'
+        Should -Invoke Publish-StackRelease -Times 0 -Exactly
+        Should -Invoke Stop-StackComponent -Times 0 -Exactly
+    }
+
+    It 'preserves approved existing owner contracts at <Folder>' -ForEach @(
+        @{ Folder = '\SevGrp\AIUsageTracker\' }
+        @{ Folder = '\Sevnet\AIUsageTracker\' }
+        @{ Folder = '\AdminTasks\AIUsageTracker\' }
+    ) {
+        { Assert-StackTaskNamespace -Folder $Folder -ExistingTask } | Should -Not -Throw
+    }
+
+    It 'rejects malformed or unowned existing task namespaces at <Folder>' -ForEach @(
+        @{ Folder = '\Sevnet\' }
+        @{ Folder = '\AdminTasks\' }
+        @{ Folder = '\SevGrp\ Owner\' }
+        @{ Folder = '\SevGrp\Owner/Child\' }
+        @{ Folder = '\SevGrp\\Owner\' }
+        @{ Folder = '\SevGrp\Owner\..\' }
+        @{ Folder = '\SevGrp\Owner:\' }
+    ) {
+        { Assert-StackTaskNamespace -Folder $Folder -ExistingTask } | Should -Throw '*namespace*'
     }
 }

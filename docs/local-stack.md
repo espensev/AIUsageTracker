@@ -7,7 +7,7 @@ build of `AIUsageTracker.Monitor` and `AIUsageTracker.Web` from a release direct
 ```powershell
 pwsh -File scripts/local-stack.ps1                 # deploy the current checkout
 pwsh -File scripts/local-stack.ps1 -Action status  # inspect without changing anything
-Invoke-Pester -Path scripts/local-stack.Tests.ps1  # unit tests for the pure helpers
+Invoke-Pester -Path scripts/local-stack.Tests.ps1  # helpers and mocked system boundaries
 ```
 
 ## Layout
@@ -19,13 +19,20 @@ Invoke-Pester -Path scripts/local-stack.Tests.ps1  # unit tests for the pure hel
 | Web task | discovered by its action (`AIUsageTracker.Web.exe --urls http://localhost:5100`) | Logon trigger, hidden, same restart policy. |
 | Data | `%LOCALAPPDATA%\AIUsageTracker` | `usage.db`, `preferences.json`, `providers.json`, `monitor.json`, `logs\`. Never inside a release directory. |
 
-Task discovery is by executable name, so the task folder is not hardcoded. Only when no
-tasks exist are they created, under `-TaskFolder` (default `\AIUsageTracker`).
+Task discovery is by executable name. When neither task exists, they are created under
+`-TaskFolder` (default `\SevGrp\AIUsageTracker\`). New folder overrides must name an owner
+under `\SevGrp\`; root, `\MyTasks\`, bare `\SevGrp\`, and unrelated namespaces are rejected
+before publishing or changing scheduler state. Existing owner folders under `\Sevnet\`
+or `\AdminTasks\` are preserved; existing tasks in forbidden folders require remediation
+by their owner before this script can deploy.
 
 ## Deploy sequence
 
-1. Preflight: git sha and dirty state, dotnet on PATH, both tasks found (or neither), and the
-   DevMesh machine-identity verifier when it is installed.
+1. Preflight: permitted task namespaces, git sha and dirty state, dotnet on PATH, both tasks
+   found (or neither), and the installed DevMesh machine-identity verifier resolved from the
+   Windows LocalApplicationData known folder. Deployment requires exactly one `VERIFIED`
+   result for `snd-desk`, instance `ca96d510-7d87-4cec-8e1a-bd8fc3866903`; an absent verifier
+   or any other result stops deployment. `-Action status` remains available without this gate.
 2. Publish Monitor and Web into the new release directory and check the required files.
 3. Stop the Web task, then the Monitor task. Web goes first because the dashboard can
    relaunch a Monitor it believes is missing, and that launch would come from the old release.

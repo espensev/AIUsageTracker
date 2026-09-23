@@ -11,8 +11,8 @@ verifies the dashboard answers. It prints the previous release and the exact rol
 status prints the tasks, running processes, listening ports, monitor metadata and the
 dashboard's view of the Monitor.
 
-The tasks are found by what they run (AIUsageTracker.Monitor.exe / AIUsageTracker.Web.exe), so
-no task folder is hardcoded. When no tasks exist they are created under -TaskFolder: Monitor at
+The tasks are found by what they run (AIUsageTracker.Monitor.exe / AIUsageTracker.Web.exe).
+When no tasks exist they are created under -TaskFolder (default \SevGrp\AIUsageTracker\): Monitor at
 boot (S4U, no stored password), Web at logon (hidden), both restarting on failure.
 
 .EXAMPLE
@@ -24,7 +24,7 @@ param(
     [ValidateSet('deploy', 'status')]
     [string]$Action = 'deploy',
     [string]$ReleaseRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\AIUsageTracker\Web\releases'),
-    [string]$TaskFolder = '\AIUsageTracker',
+    [string]$TaskFolder = '\SevGrp\AIUsageTracker\',
     [string]$WebUrl = 'http://localhost:5100',
     [int]$MonitorPort = 5000,
     [int]$TimeoutSeconds = 90
@@ -182,6 +182,24 @@ function ConvertTo-StackRollbackCommand {
     return "Set-ScheduledTask -TaskPath '$TaskPath' -TaskName '$TaskName' -Action ($actionText)"
 }
 
+function Assert-StackTaskNamespace {
+    param(
+        [AllowEmptyString()] [string]$Folder,
+        [switch]$ExistingTask
+    )
+
+    # Existing owner contracts may remain; new registrations use SevGrp only.
+    $owners = if ($ExistingTask) { 'SevGrp|Sevnet|AdminTasks' } else { 'SevGrp' }
+    if ($Folder -notmatch "^\\($owners)\\[^\\]+(?:\\[^\\]+)*\\?$") {
+        throw "task namespace must contain an owner folder under \SevGrp\ (existing \Sevnet\ and \AdminTasks\ owners may remain): $Folder"
+    }
+    foreach ($segment in $Folder.Trim('\').Split('\')) {
+        if ($segment -in @('.', '..') -or $segment -ne $segment.Trim() -or $segment -match '[/:*?"<>|\x00-\x1f]') {
+            throw "invalid task namespace segment in: $Folder"
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # System access
 # ---------------------------------------------------------------------------
@@ -299,19 +317,30 @@ function Wait-StackCondition {
     return $false
 }
 
+function Invoke-StackInstalledVerifier {
+    param([Parameter(Mandatory)] [string]$Path)
+
+    return @(& $Path)
+}
+
 function Invoke-StackIdentityGate {
-    <# Runs the DevMesh local machine verifier when it is installed; otherwise notes that it is absent. #>
+    <# Require the installed verifier and the expected controller identity before mutation. #>
     $verifier = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'common_dev\v2\Test-LocalMachineIdentity.ps1'
     if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
-        Write-Detail 'machine identity verifier not installed; skipping gate'
-        return
+        throw "machine identity verifier is not installed at $verifier; refusing to mutate tasks"
     }
-    $results = @(& $verifier)
-    $verified = @($results | Where-Object { $_.PSObject.Properties['status'] -and $_.status -eq 'VERIFIED' })
-    if ($verified.Count -ne 1) {
-        throw "machine identity verifier did not return exactly one VERIFIED result (got $($verified.Count)); refusing to mutate tasks"
+    $results = @(Invoke-StackInstalledVerifier -Path $verifier)
+    if ($results.Count -ne 1) {
+        throw "machine identity verifier must return exactly one VERIFIED result (got $($results.Count)); refusing to mutate tasks"
     }
-    Write-Detail "machine identity VERIFIED: $($verified[0].machineId) / $($verified[0].computerName)"
+    $result = $results[0]
+    if ($null -eq $result -or
+        -not $result.PSObject.Properties['status'] -or $result.status -cne 'VERIFIED' -or
+        -not $result.PSObject.Properties['machineId'] -or $result.machineId -cne 'snd-desk' -or
+        -not $result.PSObject.Properties['instanceId'] -or $result.instanceId -cne 'ca96d510-7d87-4cec-8e1a-bd8fc3866903') {
+        throw 'machine identity verifier did not verify snd-desk / ca96d510-7d87-4cec-8e1a-bd8fc3866903; refusing to mutate tasks'
+    }
+    Write-Detail "machine identity VERIFIED: $($result.machineId) / $($result.instanceId)"
 }
 
 function Get-StackGitState {
@@ -373,6 +402,7 @@ function Set-StackTaskRelease {
         [string]$Arguments = ''
     )
 
+    Assert-StackTaskNamespace -Folder $Task.TaskPath -ExistingTask
     $newAction = New-StackTaskAction -ReleaseDirectory $ReleaseDirectory -ExecutableName $ExecutableName -Arguments $Arguments
     Set-ScheduledTask -TaskPath $Task.TaskPath -TaskName $Task.TaskName -Action $newAction | Out-Null
 }
@@ -385,6 +415,7 @@ function Register-StackTasks {
         [Parameter(Mandatory)] [string]$WebArguments
     )
 
+    Assert-StackTaskNamespace -Folder $Folder
     $userId = "$env:USERDOMAIN\$env:USERNAME"
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
@@ -460,7 +491,7 @@ function Invoke-StackStatus {
     if ($null -eq $tasks.Monitor -or $null -eq $tasks.Web) { $healthy = $false }
 
     Write-Step 'Processes'
-    $procs = Get-StackProcesses
+    $procs = @(Get-StackProcesses)
     if ($procs.Count -eq 0) {
         Write-Detail 'none running'
         $healthy = $false
@@ -522,6 +553,7 @@ function Invoke-StackDeploy {
     $startedAt = Get-Date
 
     Write-Step 'Preflight'
+    Assert-StackTaskNamespace -Folder $TaskFolder
     $git = Get-StackGitState -RepoRoot $repoRoot
     Write-Detail "source: $repoRoot @ $($git.Sha.Substring(0, 8)) ($($git.Branch))$(if ($git.Dirty) { ' with uncommitted tracked changes' })"
     if ($null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
@@ -530,6 +562,9 @@ function Invoke-StackDeploy {
     Invoke-StackIdentityGate
 
     $tasks = Get-StackTasks
+    foreach ($task in @($tasks.Monitor, $tasks.Web)) {
+        if ($null -ne $task) { Assert-StackTaskNamespace -Folder $task.TaskPath -ExistingTask }
+    }
     $previousMonitorRelease = Get-StackTaskReleaseDirectory -Task $tasks.Monitor
     $previousWebRelease = Get-StackTaskReleaseDirectory -Task $tasks.Web
     $webAction = Get-StackTaskAction -Task $tasks.Web
