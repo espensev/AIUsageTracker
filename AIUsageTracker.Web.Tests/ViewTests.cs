@@ -24,6 +24,27 @@ public class ViewTests : WebTestBase
         new(@"@[A-Z]\w*\.", RegexOptions.Compiled, RegexTimeout);
 
     [TestMethod]
+    public async Task Index_SuppressedProviderIsHiddenButHistoryRemainsAvailableAsync()
+    {
+        var root = TestTempPaths.CreateDirectory("web-suppressed-provider");
+        WebTestDatabaseFixture.CreatePopulated(root);
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "AIUsageTracker", "preferences.json"),
+            "{\"SuppressedProviderIds\":[\"OPENAI\"]}");
+        using var factory = new KestrelWebApplicationFactory<Program>(root);
+        using var client = new HttpClient { BaseAddress = new Uri(factory.ServerAddress) };
+
+        using var response = await client.GetAsync("/?showInactive=true");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var html = await ReadBodyAsync(response);
+        Assert.IsFalse(html.Contains("data-provider-id=\"openai\"", StringComparison.OrdinalIgnoreCase));
+
+        using var history = await client.GetAsync("/provider/openai");
+        Assert.AreEqual(HttpStatusCode.OK, history.StatusCode);
+        Assert.IsTrue((await ReadBodyAsync(history)).Contains("OpenAI", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     [DataRow("/")]
     [DataRow("/providers")]
     [DataRow("/charts")]

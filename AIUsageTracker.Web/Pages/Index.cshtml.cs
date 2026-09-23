@@ -24,6 +24,7 @@ public class IndexModel : PageModel
     private readonly WebDatabaseService _dbService;
     private readonly UsageAnalyticsService _analyticsService;
     private readonly PreferencesStore _preferencesStore;
+    private readonly HashSet<string> _suppressedProviderIds = new(StringComparer.OrdinalIgnoreCase);
 
     public IndexModel(WebDatabaseService dbService, UsageAnalyticsService analyticsService, PreferencesStore preferencesStore)
     {
@@ -121,7 +122,7 @@ public class IndexModel : PageModel
         this.ResolveShowUsedPreference(showUsed);
         this.ResolveShowInactivePreference();
         this.ResolveExperimentalAnomalyPreference();
-        await this.LoadColorThresholdsAsync().ConfigureAwait(false);
+        await this.LoadPreferencesAsync().ConfigureAwait(false);
 
         // Budget and comparison are always enabled (experimental)
         this.EnableExperimentalBudgetPolicies = true;
@@ -193,11 +194,13 @@ public class IndexModel : PageModel
         }
 
         var latestUsageTask = this._dbService.GetLatestUsageAsync(includeInactive: true);
-        var summaryTask = this._dbService.GetUsageSummaryAsync();
+        var summaryTask = this._dbService.GetUsageSummaryAsync(this._suppressedProviderIds);
 
         await Task.WhenAll(latestUsageTask, summaryTask).ConfigureAwait(false);
 
-        this.LatestUsage = await latestUsageTask.ConfigureAwait(false);
+        this.LatestUsage = (await latestUsageTask.ConfigureAwait(false))
+            .Where(usage => !this._suppressedProviderIds.Contains(ProviderMetadataCatalog.GetProviderOwnerId(usage.ProviderId)))
+            .ToList();
         this.Summary = await summaryTask.ConfigureAwait(false);
 
         if (this.LatestUsage.Count == 0)
@@ -260,11 +263,12 @@ public class IndexModel : PageModel
                 StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task LoadColorThresholdsAsync()
+    private async Task LoadPreferencesAsync()
     {
         var prefs = await this._preferencesStore.LoadAsync().ConfigureAwait(false);
         this.ColorThresholdYellow = prefs.ColorThresholdYellow;
         this.ColorThresholdRed = prefs.ColorThresholdRed;
+        this._suppressedProviderIds.UnionWith(prefs.SuppressedProviderIds.Select(ProviderMetadataCatalog.GetProviderOwnerId));
     }
 
     private void SetBooleanCookie(string name, bool value)

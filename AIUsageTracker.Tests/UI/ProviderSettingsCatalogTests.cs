@@ -11,6 +11,22 @@ public sealed class ProviderSettingsCatalogTests
 {
     private static readonly string TestApiKey = Guid.NewGuid().ToString();
 
+    [Theory]
+    [InlineData("opencode-zen", "OPENCODE-ZEN")]
+    [InlineData("kimi-for-coding", "KIMI")]
+    [InlineData("kimi", "kimi-for-coding")]
+    public void UnsuppressProvider_ReaddedKeyClearsEquivalentIds(string providerId, string suppressedId)
+    {
+        var preferences = new AppPreferences
+        {
+            SuppressedProviderIds = new List<string> { suppressedId, providerId, "groq" },
+        };
+
+        SettingsWindow.UnsuppressProvider(preferences, providerId);
+
+        Assert.Equal(new[] { "groq" }, preferences.SuppressedProviderIds);
+    }
+
     [Fact]
     public void GetInputMode_ReturnsSessionAuth_ForCodexSpark()
     {

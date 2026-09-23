@@ -281,7 +281,7 @@ public class DialogOpenBehaviorTests
             services.GetRequiredService<GitHubUpdateChecker>(),
             dialogService ?? services.GetRequiredService<IDialogService>(),
             browserService ?? services.GetRequiredService<IBrowserService>(),
-            services.GetRequiredService<UiPreferencesStore>());
+            TestUiPreferencesStore.Create());
     }
 
     private static App EnsureAppCreated()

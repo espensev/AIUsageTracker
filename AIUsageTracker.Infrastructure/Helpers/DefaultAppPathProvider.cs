@@ -9,23 +9,32 @@ namespace AIUsageTracker.Infrastructure.Helpers;
 public class DefaultAppPathProvider : IAppPathProvider
 {
     private const string AppDirectoryName = "AIUsageTracker";
+    private readonly string _localAppDataRoot;
+
+    public DefaultAppPathProvider()
+        : this(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))
+    {
+    }
+
+    public DefaultAppPathProvider(string localAppDataRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localAppDataRoot);
+        this._localAppDataRoot = localAppDataRoot;
+    }
 
     public string GetAppDataRoot()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return GetCanonicalAppDataRoot(localAppData);
+        return GetCanonicalAppDataRoot(this._localAppDataRoot);
     }
 
     public string GetDatabasePath()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return GetCanonicalDatabasePath(localAppData);
+        return GetCanonicalDatabasePath(this._localAppDataRoot);
     }
 
     public string GetLogDirectory()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return GetCanonicalLogDirectory(localAppData);
+        return GetCanonicalLogDirectory(this._localAppDataRoot);
     }
 
     public string GetAuthFilePath()
@@ -36,25 +45,27 @@ public class DefaultAppPathProvider : IAppPathProvider
 
     public string GetPreferencesFilePath()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return GetCanonicalPreferencesPath(localAppData);
+        return GetCanonicalPreferencesPath(this._localAppDataRoot);
     }
 
     public string GetProviderConfigFilePath()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return GetCanonicalProviderConfigPath(localAppData);
+        return GetCanonicalProviderConfigPath(this._localAppDataRoot);
     }
 
     public string GetMonitorInfoFilePath()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Join(GetCanonicalAppDataRoot(localAppData), "monitor.json");
+        return Path.Join(this.GetAppDataRoot(), "monitor.json");
     }
 
     public string GetUserProfileRoot()
     {
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
+
+    public string? GetEnvironmentVariable(string name)
+    {
+        return Environment.GetEnvironmentVariable(name);
     }
 
     private static string GetCanonicalAppDataRoot(string localAppDataRoot)
