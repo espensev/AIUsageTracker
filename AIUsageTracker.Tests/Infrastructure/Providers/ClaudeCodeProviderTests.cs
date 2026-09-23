@@ -459,6 +459,44 @@ public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>
         Assert.Contains("No API key configured", usage.Description, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Regression: the provider used to fall back to running <c>claude usage</c>. The CLI has no
+    /// such subcommand, so every refresh cycle started a full Claude Code agent session.
+    /// </summary>
+    /// <returns><placeholder>A <see cref="Task"/> representing the asynchronous unit test.</placeholder></returns>
+    [Fact]
+    public async Task GetUsageAsync_ApiKeyRejectedByBothEndpoints_ReportsHttpFailureInsteadOfRunningCliAsync()
+    {
+        // Arrange — the OAuth usage endpoint and the rate-limit probe both reject the key
+        this.SetupOAuthResponse(HttpStatusCode.Unauthorized, "{}");
+        this.SetupMessagesResponse(HttpStatusCode.Unauthorized, "{}");
+
+        // Act
+        var usage = (await this._provider.GetUsageAsync(this.Config)).Single();
+
+        // Assert
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(ProviderUsageState.Error, usage.State);
+        Assert.Equal(401, usage.HttpStatus);
+        Assert.Contains("Authentication failed", usage.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_OAuthTokenRejected_ReportsHttpFailureInsteadOfRunningCliAsync()
+    {
+        // Arrange — OAuth tokens skip the rate-limit probe, so the usage endpoint is the only source
+        this.Config.ApiKey = $"sk-ant-oat-{TestApiKey}";
+        this.SetupOAuthResponse(HttpStatusCode.Forbidden, "{}");
+
+        // Act
+        var usage = (await this._provider.GetUsageAsync(this.Config)).Single();
+
+        // Assert
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(ProviderUsageState.Error, usage.State);
+        Assert.Equal(403, usage.HttpStatus);
+    }
+
     [Fact]
     public void StaticDefinition_HasCorrectConfiguration()
     {
@@ -481,6 +519,17 @@ public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>
     public void OAuthBetaHeader_HasCorrectValue()
     {
         Assert.Equal("oauth-2025-04-20", ClaudeCodeProvider.OAuthBetaHeader);
+    }
+
+    private void SetupMessagesResponse(HttpStatusCode statusCode, string content)
+    {
+        this.SetupHttpResponse(
+            r => string.Equals(r.RequestUri?.ToString(), "https://api.anthropic.com/v1/messages", StringComparison.Ordinal),
+            new HttpResponseMessage
+            {
+                StatusCode = statusCode,
+                Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json"),
+            });
     }
 
     private void SetupOAuthResponse(HttpStatusCode statusCode, string content)

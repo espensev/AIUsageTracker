@@ -2,6 +2,7 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.ComponentModel;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -46,6 +47,80 @@ public sealed class MonitorStartupPathTests : IDisposable
         Assert.Equal(5123, result!.Port);
         Assert.Equal(4242, result.ProcessId);
         Assert.True(File.Exists(infoPath));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task GetAgentStatusInfoAsync_PreservesMetadata_WhenProcessInspectionIsDeniedAsync(
+        bool healthOk,
+        bool managedAccessDenied)
+    {
+        var infoPath = await this.CreateMonitorInfoAsync(new MonitorInfo
+        {
+            Port = 5123,
+            ProcessId = 4242,
+            AccessToken = "test-monitor-token",
+        });
+        var originalMetadata = await File.ReadAllTextAsync(infoPath);
+        Exception denied = managedAccessDenied
+            ? new UnauthorizedAccessException("Process inspection denied")
+            : new Win32Exception(5);
+        var launcher = new MonitorLauncher(
+            monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+            healthCheckOverride: _ => Task.FromResult(healthOk),
+            processRunningOverride: _ => Task.FromException<bool>(denied));
+
+        var status = await launcher.GetAgentStatusInfoAsync();
+        var metadata = await launcher.GetMonitorMetadataSnapshotAsync();
+
+        Assert.Equal(healthOk, status.IsRunning);
+        Assert.Equal(5123, status.Port);
+        Assert.True(status.HasMetadata);
+        Assert.Equal(healthOk, metadata.IsUsable);
+        Assert.Equal("test-monitor-token", metadata.Info?.AccessToken);
+        Assert.Equal(originalMetadata, await File.ReadAllTextAsync(infoPath));
+        Assert.Empty(Directory.GetFiles(this._tempDirectory, "monitor.json.stale.*"));
+    }
+
+    [Fact]
+    public async Task GetAgentStatusInfoAsync_PreservesStartingState_WhenProcessInspectionIsDeniedAsync()
+    {
+        var infoPath = await this.CreateMonitorInfoAsync(new MonitorInfo
+        {
+            Port = 5000,
+            ProcessId = 4242,
+            Errors = new List<string> { "Startup status: starting" },
+        });
+        var launcher = new MonitorLauncher(
+            monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+            healthCheckOverride: _ => Task.FromResult(false),
+            processRunningOverride: _ => throw new Win32Exception(5));
+
+        var status = await launcher.GetAgentStatusInfoAsync();
+
+        Assert.False(status.IsRunning);
+        Assert.Equal("monitor-starting", status.Error);
+        Assert.True(File.Exists(infoPath));
+    }
+
+    [Fact]
+    public async Task GetAndValidateMonitorInfoAsync_InvalidatesMonitorInfo_WhenProcessExitedDespiteHealthyPortAsync()
+    {
+        var infoPath = await this.CreateMonitorInfoAsync(new MonitorInfo
+        {
+            Port = 5123,
+            ProcessId = 4242,
+        });
+        var launcher = new MonitorLauncher(
+            monitorInfoCandidatePathsOverride: () => new[] { infoPath },
+            healthCheckOverride: _ => Task.FromResult(true),
+            processRunningOverride: _ => Task.FromResult(false));
+
+        Assert.Null(await launcher.GetAndValidateMonitorInfoAsync());
+        Assert.False(File.Exists(infoPath));
     }
 
     [Fact]

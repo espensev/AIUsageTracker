@@ -2,12 +2,10 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
-using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Core.Providers;
 using Microsoft.Extensions.Logging;
@@ -113,13 +111,16 @@ public class ClaudeCodeProvider : ProviderBase
         }
 
         // Try OAuth usage endpoint first (for subscription users)
+        var failureStatus = 0;
         try
         {
-            var oauthUsages = await this.GetUsageFromOAuthAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
+            var (oauthUsages, oauthFailureStatus) = await this.TryGetUsageFromOAuthAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
             if (oauthUsages != null)
             {
                 return oauthUsages;
             }
+
+            failureStatus = oauthFailureStatus;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -132,20 +133,26 @@ public class ClaudeCodeProvider : ProviderBase
         {
             try
             {
-                var apiUsage = await this.GetUsageFromApiAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
+                var (apiUsage, apiFailureStatus) = await this.GetUsageFromApiAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
                 if (apiUsage != null)
                 {
                     return new[] { apiUsage };
                 }
+
+                if (apiFailureStatus != 0)
+                {
+                    failureStatus = apiFailureStatus;
+                }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
             {
-                this._logger.LogWarning(ex, "Failed to get Claude usage from API, falling back to CLI");
+                this._logger.LogWarning(ex, "Failed to get Claude usage from API");
             }
         }
 
-        // Fall back to CLI if API fails
-        return await this.GetUsageFromCliAsync(providerLabel).ConfigureAwait(false);
+        // Neither source answered. Report that rather than shelling out to the claude CLI:
+        // it has no usage subcommand, so "claude usage" starts a full agent session.
+        return new[] { this.CreateUsageUnavailable(failureStatus, providerLabel) };
     }
 
     /// <summary>
@@ -154,6 +161,16 @@ public class ClaudeCodeProvider : ProviderBase
     /// <param name="accessToken">The OAuth access token from credentials file.</param>
     /// <returns>Provider usages if successful, null otherwise.</returns>
     internal async Task<IEnumerable<ProviderUsage>?> GetUsageFromOAuthAsync(string accessToken, string providerLabel)
+    {
+        var (usages, _) = await this.TryGetUsageFromOAuthAsync(accessToken, providerLabel).ConfigureAwait(false);
+        return usages;
+    }
+
+    /// <summary>
+    /// Gets usage from the OAuth usage endpoint, keeping the HTTP status of a refusal.
+    /// </summary>
+    /// <returns>The usages, or null with the refusing HTTP status (0 when there was none).</returns>
+    private async Task<(IEnumerable<ProviderUsage>? Usages, int FailureStatus)> TryGetUsageFromOAuthAsync(string accessToken, string providerLabel)
     {
         try
         {
@@ -169,28 +186,45 @@ public class ClaudeCodeProvider : ProviderBase
             if ((int)statusCode < 200 || (int)statusCode >= 300)
             {
                 this._logger.LogDebug("OAuth usage endpoint returned {StatusCode}: {Body}", statusCode, responseBody);
-                return null;
+                return (null, (int)statusCode);
             }
 
             var usageResponse = JsonSerializer.Deserialize<OAuthUsageResponse>(responseBody);
             if (usageResponse == null)
             {
                 this._logger.LogWarning("Failed to deserialize OAuth usage response");
-                return null;
+                return (null, 0);
             }
 
-            return this.ParseOAuthUsageResponse(usageResponse, responseBody, (int)statusCode, providerLabel);
+            return (this.ParseOAuthUsageResponse(usageResponse, responseBody, (int)statusCode, providerLabel), 0);
         }
         catch (HttpRequestException ex)
         {
             this._logger.LogDebug(ex, "OAuth usage endpoint request failed");
-            return null;
+            return (null, 0);
         }
         catch (JsonException ex)
         {
             this._logger.LogWarning(ex, "Failed to parse OAuth usage response");
-            return null;
+            return (null, 0);
         }
+    }
+
+    private StatusProviderUsage CreateUsageUnavailable(int failureStatus, string providerLabel)
+    {
+        StatusProviderUsage usage;
+        if (failureStatus == 0)
+        {
+            usage = this.CreateUnavailableUsage("Usage data unavailable", state: ProviderUsageState.Unavailable);
+        }
+        else
+        {
+            var description = DescribeUnavailableStatus((System.Net.HttpStatusCode)failureStatus);
+            usage = this.CreateUnavailableUsage(description, failureStatus, failureContext: HttpFailureContext.FromHttpStatus(failureStatus, description));
+        }
+
+        usage.ProviderName = providerLabel;
+        return usage;
     }
 
     private async Task<(System.Net.HttpStatusCode StatusCode, string Body)> SendOAuthRequestAsync(string accessToken)
@@ -363,7 +397,7 @@ public class ClaudeCodeProvider : ProviderBase
         return results;
     }
 
-    private async Task<ProviderUsage?> GetUsageFromApiAsync(string apiKey, string providerLabel)
+    private async Task<(ProviderUsage? Usage, int FailureStatus)> GetUsageFromApiAsync(string apiKey, string providerLabel)
     {
         try
         {
@@ -407,7 +441,7 @@ public class ClaudeCodeProvider : ProviderBase
                 // Build description with rate limit info
                 var description = $"Tier: {rateLimitHeaders.GetTierName()} | RPM: {rateLimitHeaders.RequestsRemaining.ToString(CultureInfo.InvariantCulture)}/{rateLimitHeaders.RequestsLimit.ToString(CultureInfo.InvariantCulture)} | Tokens/min: {rateLimitHeaders.InputTokensRemaining.ToString(CultureInfo.InvariantCulture)}/{rateLimitHeaders.InputTokensLimit.ToString(CultureInfo.InvariantCulture)}";
 
-                return new QuotaProviderUsage
+                var usage = new QuotaProviderUsage
                 {
                     ProviderId = this.ProviderId,
                     ProviderName = providerLabel,
@@ -422,15 +456,16 @@ public class ClaudeCodeProvider : ProviderBase
                     RawJson = responseBody,
                     HttpStatus = (int)testResponse.StatusCode,
                 };
+                return (usage, 0);
             }
 
             // No rate limit headers found
-            return null;
+            return (null, testResponse.IsSuccessStatusCode ? 0 : (int)testResponse.StatusCode);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             this._logger.LogError(ex, "Error calling Anthropic API");
-            return null;
+            return (null, 0);
         }
     }
 
@@ -442,146 +477,6 @@ public class ClaudeCodeProvider : ProviderBase
             RequestsRemaining = (int)(TryGetHeaderDouble(headers, "anthropic-ratelimit-requests-remaining") ?? 0),
             InputTokensLimit = (int)(TryGetHeaderDouble(headers, "anthropic-ratelimit-input-tokens-limit") ?? 0),
             InputTokensRemaining = (int)(TryGetHeaderDouble(headers, "anthropic-ratelimit-input-tokens-remaining") ?? 0),
-        };
-    }
-
-    private async Task<IEnumerable<ProviderUsage>> GetUsageFromCliAsync(string providerLabel)
-    {
-        return await Task.Run(async () =>
-        {
-            try
-            {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "claude",
-                    Arguments = "usage",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-
-                using var process = Process.Start(startInfo);
-                if (process == null)
-                {
-                    // CLI not found, but key is configured - show as available
-                    return new[]
-                    {
-                        new StatusProviderUsage
-                    {
-                        ProviderId = this.ProviderId,
-                        ProviderName = providerLabel,
-                        IsAvailable = true,
-                        Description = "Connected (API key configured)",
-                        RawJson = "{\"source\":\"claude-cli\",\"status\":\"process_start_failed\"}",
-                        HttpStatus = 503,
-                    },
-                    };
-                }
-
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-                var errorTask = process.StandardError.ReadToEndAsync();
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                try
-                {
-                    await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException ex)
-                {
-                    this._logger.LogWarning(ex, "Claude Code CLI timed out");
-                }
-
-                var output = await outputTask.ConfigureAwait(false);
-                var error = await errorTask.ConfigureAwait(false);
-
-                if (process.ExitCode != 0)
-                {
-                    this._logger.LogWarning("Claude Code CLI failed: {Error}", error);
-
-                    // CLI failed, but key is configured - show as available
-                    return new[]
-                    {
-                        new StatusProviderUsage
-                    {
-                        ProviderId = this.ProviderId,
-                        ProviderName = providerLabel,
-                        IsAvailable = true,
-                        Description = "Connected (API key configured)",
-                        RawJson = string.IsNullOrWhiteSpace(error) ? "{\"source\":\"claude-cli\",\"status\":\"failed\"}" : error,
-                        HttpStatus = 500,
-                    },
-                    };
-                }
-
-                return new[] { this.ParseCliOutput(output, providerLabel) };
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
-            {
-                this._logger.LogError(ex, "Failed to run Claude Code CLI");
-
-                // Exception occurred, but key is configured - show as available
-                return new[]
-                {
-                    new StatusProviderUsage
-                {
-                    ProviderId = this.ProviderId,
-                    ProviderName = providerLabel,
-                    IsAvailable = true,
-                    Description = "Connected (API key configured)",
-                    RawJson = ex.ToString(),
-                    HttpStatus = 500,
-                },
-                };
-            }
-        }).ConfigureAwait(false);
-    }
-
-    private ProviderUsage ParseCliOutput(string output, string providerLabel)
-    {
-        // Parse Claude Code usage output
-        double currentUsage = 0;
-        double budgetLimit = 0;
-
-        var usageMatch = Regex.Match(output, @"Current Usage[:\s]+\$?(?<usage>[0-9.]+)", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture, TimeSpan.FromSeconds(1));
-        if (usageMatch.Success)
-        {
-            double.TryParse(usageMatch.Groups["usage"].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out currentUsage);
-        }
-
-        var budgetMatch = Regex.Match(output, @"Budget Limit[:\s]+\$?(?<budget>[0-9.]+)", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture, TimeSpan.FromSeconds(1));
-        if (budgetMatch.Success)
-        {
-            double.TryParse(budgetMatch.Groups["budget"].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out budgetLimit);
-        }
-
-        var remainingMatch = Regex.Match(output, @"Remaining[:\s]+\$?(?<remaining>[0-9.]+)", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture, TimeSpan.FromSeconds(1));
-        if (remainingMatch.Success && budgetLimit is 0)
-        {
-            double remaining;
-            if (double.TryParse(remainingMatch.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out remaining))
-            {
-                budgetLimit = currentUsage + remaining;
-            }
-        }
-
-        double usagePercentage = budgetLimit > 0 ? (currentUsage / budgetLimit) * 100.0 : 0;
-
-        return new QuotaProviderUsage
-        {
-            ProviderId = this.ProviderId,
-            ProviderName = providerLabel,
-            UsedPercent = Math.Min(usagePercentage, 100),
-            RequestsUsed = currentUsage,
-            RequestsAvailable = budgetLimit,
-            IsCurrencyUsage = true,
-            IsQuotaBased = false,
-            PlanType = this.Definition.PlanType,
-            IsAvailable = true,
-            Description = budgetLimit > 0
-                ? $"${currentUsage.ToString("F2", CultureInfo.InvariantCulture)} used of ${budgetLimit.ToString("F2", CultureInfo.InvariantCulture)} limit"
-                : $"${currentUsage.ToString("F2", CultureInfo.InvariantCulture)} used",
-            RawJson = output,
-            HttpStatus = 200,
         };
     }
 

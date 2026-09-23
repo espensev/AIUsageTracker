@@ -30,6 +30,35 @@ public sealed class IndexUsageProjectionTests
         Assert.AreEqual("on-demand-credits", ((QuotaProviderUsage)sibling).CardId);
     }
 
+    [TestMethod]
+    [DataRow(-1, false)]
+    [DataRow(0, true)]
+    [DataRow(1, true)]
+    public void ProjectProviderAttention_OnlyReportsFailuresAtTheLatestReading(int failureOffsetMinutes, bool expectedAttention)
+    {
+        var successfulReading = CreateGrokCard("weekly-credits", "Weekly", 30);
+        successfulReading.FetchedAt = new DateTime(2026, 9, 21, 8, 0, 0, DateTimeKind.Utc);
+        var failedReading = CreateGrokCard(string.Empty, "Provider status", 0);
+        failedReading.ProviderId = "GROK";
+        failedReading.IsAvailable = false;
+        failedReading.FetchedAt = successfulReading.FetchedAt.AddMinutes(failureOffsetMinutes);
+
+        foreach (var rows in new[]
+        {
+            new ProviderUsage[] { failedReading, successfulReading },
+            new ProviderUsage[] { successfulReading, failedReading },
+        })
+        {
+            var attention = IndexModel.ProjectProviderAttention(rows);
+
+            Assert.AreEqual(expectedAttention ? 1 : 0, attention.Count);
+            if (expectedAttention)
+            {
+                Assert.AreSame(failedReading, attention[0]);
+            }
+        }
+    }
+
     private static WindowedProviderUsage CreateGrokCard(string cardId, string name, double usedPercent)
     {
         return new WindowedProviderUsage

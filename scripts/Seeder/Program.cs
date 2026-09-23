@@ -2,6 +2,7 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dapper;
@@ -37,7 +38,8 @@ public class Program
             return 1;
         }
 
-        return SeedDatabase(seedPath);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return SeedDatabase(seedPath, Path.Combine(appData, "AIUsageTracker", "usage.db"));
     }
 
     private static string? ValidateFixturePath(string relativePath)
@@ -303,12 +305,9 @@ public class Program
         Console.WriteLine($"  7-day history: {fixture.History7Days.Count}");
     }
 
-    private static int SeedDatabase(string fixturePath)
+    public static int SeedDatabase(string fixturePath, string dbPath)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dbDir = Path.Combine(appData, "AIUsageTracker");
-        Directory.CreateDirectory(dbDir);
-        var dbPath = Path.Combine(dbDir, "usage.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
 
         if (File.Exists(dbPath))
         {
@@ -336,7 +335,12 @@ public class Program
 
         Console.WriteLine($"Fixture contains {fixture.Providers.Count} providers");
 
-        var connectionString = $"Data Source={dbPath}";
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Pooling = false,
+            ForeignKeys = true,
+        }.ToString();
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
 
@@ -345,43 +349,67 @@ public class Program
                 provider_id TEXT PRIMARY KEY,
                 provider_name TEXT,
                 account_name TEXT,
-                auth_source TEXT,
-                updated_at TEXT,
-                is_active INTEGER,
-                config_json TEXT
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                config_json TEXT,
+                auth_source TEXT DEFAULT 'manual',
+                plan_type TEXT DEFAULT 'usage'
             );
 
             CREATE TABLE provider_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_id TEXT,
-                requests_used REAL,
-                requests_available REAL,
-                requests_percentage REAL,
-                is_available INTEGER,
-                status_message TEXT,
+                provider_id TEXT NOT NULL,
+                is_available INTEGER NOT NULL DEFAULT 1,
+                status_message TEXT NOT NULL DEFAULT '',
                 next_reset_time TEXT,
-                fetched_at TEXT,
+                requests_used REAL NOT NULL DEFAULT 0,
+                requests_available REAL NOT NULL DEFAULT 0,
+                requests_percentage REAL NOT NULL DEFAULT 0,
+                response_latency_ms REAL NOT NULL DEFAULT 0,
+                http_status INTEGER NOT NULL DEFAULT 0,
+                upstream_response_validity INTEGER NOT NULL DEFAULT 0,
+                upstream_response_note TEXT NOT NULL DEFAULT '',
+                fetched_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 details_json TEXT,
-                response_latency_ms REAL NOT NULL DEFAULT 0
+                parent_provider_id TEXT REFERENCES providers(provider_id) ON DELETE SET NULL,
+                card_id TEXT,
+                group_id TEXT,
+                window_kind INTEGER NOT NULL DEFAULT 0,
+                model_name TEXT,
+                name TEXT,
+                card_type TEXT,
+                reset_credits_available INTEGER,
+                reset_credit_expirations_utc TEXT,
+                FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE
             );
 
             CREATE TABLE reset_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_id TEXT,
-                provider_name TEXT,
+                provider_id TEXT NOT NULL,
+                provider_name TEXT NOT NULL,
                 previous_usage REAL,
                 new_usage REAL,
-                reset_type TEXT,
-                timestamp TEXT
+                reset_type TEXT NOT NULL,
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (provider_id) REFERENCES providers(provider_id) ON DELETE CASCADE
             );
 
             CREATE TABLE raw_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_id TEXT,
-                raw_json TEXT,
-                http_status INTEGER,
-                fetched_at TEXT
+                provider_id TEXT NOT NULL REFERENCES providers(provider_id) ON DELETE CASCADE,
+                raw_json TEXT NOT NULL,
+                http_status INTEGER NOT NULL DEFAULT 200,
+                fetched_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
             );
+
+            CREATE INDEX IF NOT EXISTS idx_history_provider_time ON provider_history(provider_id, fetched_at);
+            CREATE INDEX IF NOT EXISTS idx_raw_fetched ON raw_snapshots(fetched_at);
+            CREATE INDEX IF NOT EXISTS idx_reset_provider_time ON reset_events(provider_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_history_fetched_time ON provider_history(fetched_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_provider_id_desc ON provider_history(provider_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_is_available ON provider_history(is_available);
+            CREATE INDEX IF NOT EXISTS idx_history_provider_fetched_desc ON provider_history(provider_id, fetched_at DESC);
         ");
 
         foreach (var provider in fixture.Providers)
@@ -403,6 +431,15 @@ public class Program
         var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
         foreach (var history in historyToInsert)
         {
+            // Exported history can outlive its provider metadata. Preserve those rows
+            // without presenting a history-only provider as actively configured.
+            connection.Execute(
+                @"
+                INSERT INTO providers (provider_id, provider_name, is_active)
+                VALUES (@Id, @Id, 0)
+                ON CONFLICT(provider_id) DO NOTHING",
+                new { Id = history.ProviderId });
+
             connection.Execute(
                 @"
                 INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage, is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms)
@@ -418,7 +455,7 @@ public class Program
                     IsAvail = history.IsAvailable,
                     Msg = history.StatusMessage,
                     Next = history.NextResetTime,
-                    Fetched = history.FetchedAt,
+                    Fetched = ToFetchedAtEpochSeconds(history.FetchedAt),
                     Details = history.DetailsJson,
                     Latency = history.ResponseLatencyMs,
                 });
@@ -426,6 +463,20 @@ public class Program
 
         Console.WriteLine($"Seeded {fixture.Providers.Count} providers with {historyToInsert.Count} history records.");
         return 0;
+    }
+
+    private static long ToFetchedAtEpochSeconds(string fetchedAt)
+    {
+        if (DateTimeOffset.TryParse(
+                fetchedAt,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var parsed))
+        {
+            return parsed.ToUnixTimeSeconds();
+        }
+
+        return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     }
 
     private sealed class ProviderFixture

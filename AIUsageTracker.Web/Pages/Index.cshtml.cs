@@ -102,6 +102,20 @@ public class IndexModel : PageModel
             .ToList();
     }
 
+    public static IReadOnlyList<ProviderUsage> ProjectProviderAttention(IEnumerable<ProviderUsage> usageRows)
+    {
+        ArgumentNullException.ThrowIfNull(usageRows);
+
+        return usageRows
+            .GroupBy(usage => usage.ProviderId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(usage => usage.FetchedAt)
+                .ThenBy(usage => usage.IsAvailable)
+                .First())
+            .Where(usage => !usage.IsAvailable)
+            .ToList();
+    }
+
     public async Task OnGetAsync([FromQuery] bool? showUsed)
     {
         this.ResolveShowUsedPreference(showUsed);
