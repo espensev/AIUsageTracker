@@ -18,9 +18,7 @@ public class ConfigService : IConfigService
     private readonly TokenDiscoveryService _tokenDiscovery;
     private readonly IAppPathProvider _pathProvider;
     private readonly SemaphoreSlim _configCacheLock = new(1, 1);
-    private readonly SemaphoreSlim _prefsCacheLock = new(1, 1);
     private IReadOnlyList<ProviderConfig>? _cachedConfigs;
-    private AppPreferences? _cachedPreferences;
     private int _startupAuthDiagnosticsLogged;
 
     public ConfigService(ILogger<ConfigService> logger, IAppPathProvider pathProvider)
@@ -42,6 +40,20 @@ public class ConfigService : IConfigService
 
     public async Task<IReadOnlyList<ProviderConfig>> GetConfigsAsync()
     {
+        var configs = await this.GetLoadedConfigsAsync().ConfigureAwait(false);
+        var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
+        var suppressed = prefs.SuppressedProviderIds
+            .Select(ProviderMetadataCatalog.GetProviderOwnerId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var visibleConfigs = configs
+            .Where(config => !suppressed.Contains(ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId)))
+            .ToList();
+        this.LogAuthDiagnosticsSnapshotOnceOnStartup(visibleConfigs);
+        return visibleConfigs;
+    }
+
+    private async Task<IReadOnlyList<ProviderConfig>> GetLoadedConfigsAsync()
+    {
         var cached = Volatile.Read(ref this._cachedConfigs);
         if (cached != null)
         {
@@ -57,15 +69,9 @@ public class ConfigService : IConfigService
                 return cached;
             }
 
+            // Cache the full configuration. Settings writes suppression preferences
+            // independently, so visibility must be resolved again for every caller.
             var configs = (await this._configLoader.LoadConfigAsync().ConfigureAwait(false)).ToList();
-            var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
-            var suppressed = new HashSet<string>(prefs.SuppressedProviderIds, StringComparer.OrdinalIgnoreCase);
-            configs = configs
-                .Where(config =>
-                    !suppressed.Contains(config.ProviderId) &&
-                    !suppressed.Contains(ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId)))
-                .ToList();
-            this.LogAuthDiagnosticsSnapshotOnceOnStartup(configs);
             Volatile.Write(ref this._cachedConfigs, configs);
             return configs;
         }
@@ -133,7 +139,6 @@ public class ConfigService : IConfigService
             configs.RemoveAll(config => config.ProviderId.Equals(providerId, StringComparison.OrdinalIgnoreCase));
             await this._configLoader.SaveConfigAsync(configs).ConfigureAwait(false);
             Volatile.Write<IReadOnlyList<ProviderConfig>?>(ref this._cachedConfigs, null);
-            Volatile.Write<AppPreferences?>(ref this._cachedPreferences, null); // force ScanForKeysAsync to reload suppressed list from disk
             this._logger.LogInformation("Removed: {ProviderId}", providerId);
         }
         catch (Exception ex)
@@ -145,33 +150,15 @@ public class ConfigService : IConfigService
 
     public async Task<AppPreferences> GetPreferencesAsync()
     {
-        var cached = Volatile.Read(ref this._cachedPreferences);
-        if (cached != null)
-        {
-            return cached;
-        }
-
-        await this._prefsCacheLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            cached = Volatile.Read(ref this._cachedPreferences);
-            if (cached != null)
-            {
-                return cached;
-            }
-
-            var prefs = await this._configLoader.LoadPreferencesAsync().ConfigureAwait(false);
-            Volatile.Write(ref this._cachedPreferences, prefs);
-            return prefs;
+            // Desktop and Web share this file and do not save through this service.
+            return await this._configLoader.LoadPreferencesAsync().ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             this._logger.LogError(ex, "Failed to load preferences: {Message}", ex.Message);
             return new AppPreferences();
-        }
-        finally
-        {
-            this._prefsCacheLock.Release();
         }
     }
 
@@ -180,7 +167,6 @@ public class ConfigService : IConfigService
         try
         {
             await this._configLoader.SavePreferencesAsync(preferences).ConfigureAwait(false);
-            Volatile.Write<AppPreferences?>(ref this._cachedPreferences, null);
             Volatile.Write<IReadOnlyList<ProviderConfig>?>(ref this._cachedConfigs, null);
             this._logger.LogInformation("Prefs saved");
         }
@@ -198,7 +184,9 @@ public class ConfigService : IConfigService
             var discovered = await this._tokenDiscovery.DiscoverTokensAsync().ConfigureAwait(false);
             var existing = (await this._configLoader.LoadConfigAsync().ConfigureAwait(false)).ToList();
             var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
-            var suppressed = new HashSet<string>(prefs.SuppressedProviderIds, StringComparer.OrdinalIgnoreCase);
+            var suppressed = prefs.SuppressedProviderIds
+                .Select(ProviderMetadataCatalog.GetProviderOwnerId)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var discoveredWithKeys = discovered
                 .Where(config => !string.IsNullOrWhiteSpace(config.ApiKey))
                 .ToList();
@@ -258,7 +246,7 @@ public class ConfigService : IConfigService
     {
         foreach (var newConfig in discovered)
         {
-            if (suppressed.Contains(newConfig.ProviderId))
+            if (suppressed.Contains(ProviderMetadataCatalog.GetProviderOwnerId(newConfig.ProviderId)))
             {
                 this._logger.LogDebug("Skipping suppressed provider: {ProviderId}", newConfig.ProviderId);
                 continue;

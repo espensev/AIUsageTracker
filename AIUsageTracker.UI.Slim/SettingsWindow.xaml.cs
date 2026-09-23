@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
 using AIUsageTracker.Infrastructure.MonitorClient;
 using AIUsageTracker.Infrastructure.Services;
 using AIUsageTracker.UI.Slim.Services;
@@ -906,10 +907,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        if (this._preferences.SuppressedProviderIds.Contains(config.ProviderId, StringComparer.OrdinalIgnoreCase))
-        {
-            this._preferences.SuppressedProviderIds.Remove(config.ProviderId);
-        }
+        UnsuppressProvider(this._preferences, config.ProviderId);
 
         var saved = await this._monitorService.SaveConfigAsync(config).ConfigureAwait(true);
         if (!saved)
@@ -923,6 +921,21 @@ public partial class SettingsWindow : Window
         return behavior.InputMode == ProviderInputMode.StandardApiKey &&
                string.IsNullOrWhiteSpace(config.ApiKey) &&
                !config.HasStoredApiKey;
+    }
+
+    internal static void UnsuppressProvider(AppPreferences preferences, string providerId)
+    {
+        var ownerId = ProviderMetadataCatalog.GetProviderOwnerId(providerId);
+        for (var index = preferences.SuppressedProviderIds.Count - 1; index >= 0; index--)
+        {
+            if (string.Equals(
+                ProviderMetadataCatalog.GetProviderOwnerId(preferences.SuppressedProviderIds[index]),
+                ownerId,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                preferences.SuppressedProviderIds.RemoveAt(index);
+            }
+        }
     }
 
     private async void CancelBtn_Click(object sender, RoutedEventArgs e)

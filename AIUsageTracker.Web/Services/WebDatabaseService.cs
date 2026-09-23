@@ -258,6 +258,7 @@ public class WebDatabaseService : IWebDatabaseRepository
         var excludedOwnerIds = excludedProviderIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id.Trim())
+            .Select(ProviderMetadataCatalog.GetProviderOwnerId)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
             .ToList();
