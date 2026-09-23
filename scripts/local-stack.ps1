@@ -12,7 +12,10 @@ status prints the tasks, running processes, listening ports, monitor metadata an
 dashboard's view of the Monitor.
 
 The tasks are found by what they run (AIUsageTracker.Monitor.exe / AIUsageTracker.Web.exe).
-When no tasks exist they are created under -TaskFolder (default \SevGrp\AIUsageTracker\): Monitor at
+When several tasks run the same executable the script refuses to act: ownership would be
+ambiguous. During stop, only processes launched from the tasks' own release directories are
+stopped; same-named executables elsewhere are preserved, and a port that never frees refuses
+the cutover. When no tasks exist they are created under -TaskFolder (default \SevGrp\AIUsageTracker\): Monitor at
 boot (S4U, no stored password), Web at logon (hidden), both restarting on failure.
 
 .EXAMPLE
@@ -108,12 +111,14 @@ function Get-StackActionProperty {
 }
 
 function Select-StackTask {
-    <# Picks the scheduled task whose exec action runs the given executable name. #>
+    <# Picks the scheduled task whose exec action runs the given executable name.
+       Refuses to choose when several tasks run it: ownership would be ambiguous. #>
     param(
         [AllowEmptyCollection()] [AllowNull()] [object[]]$Tasks,
         [Parameter(Mandatory)] [string]$ExecutableName
     )
 
+    $matching = [System.Collections.Generic.List[object]]::new()
     foreach ($task in @($Tasks)) {
         if ($null -eq $task) { continue }
         $actionsProperty = $task.PSObject.Properties['Actions']
@@ -123,10 +128,16 @@ function Select-StackTask {
             if ([string]::IsNullOrWhiteSpace($execute)) { continue }
             $leaf = Split-Path -Leaf ($execute.Trim('"'))
             if ($leaf -ieq $ExecutableName) {
-                return $task
+                $matching.Add($task)
+                break
             }
         }
     }
+    if ($matching.Count -gt 1) {
+        $candidates = ($matching | ForEach-Object { '{0}{1} -> {2}' -f $_.TaskPath, $_.TaskName, (Get-StackTaskReleaseDirectory -Task $_) }) -join '; '
+        throw "task ownership is ambiguous: $($matching.Count) tasks run ${ExecutableName} ($candidates); remove or re-point the task you do not own"
+    }
+    if ($matching.Count -eq 1) { return $matching[0] }
     return $null
 }
 
@@ -163,6 +174,28 @@ function Test-StackStatusPayload {
     $compatible = $Payload.PSObject.Properties['isContractCompatible']
     if ($null -eq $running -or $null -eq $compatible) { return $false }
     return ([bool]$running.Value -and [bool]$compatible.Value)
+}
+
+function Test-StackProcessOwnership {
+    <# True when the executable lives under one of the release directories this stack owns.
+       Same-named executables elsewhere belong to another installation and must be preserved. #>
+    param(
+        [AllowEmptyString()] [string]$ExecutablePath,
+        [AllowEmptyCollection()] [AllowNull()] [string[]]$OwnedDirectories
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { return $false }
+    $processDirectory = Split-Path -Parent $ExecutablePath
+    if ([string]::IsNullOrWhiteSpace($processDirectory)) { return $false }
+    foreach ($directory in @($OwnedDirectories)) {
+        if ([string]::IsNullOrWhiteSpace($directory)) { continue }
+        $owned = $directory.TrimEnd('\')
+        if ([string]::IsNullOrEmpty($owned)) { continue }
+        if ($processDirectory -ieq $owned -or $processDirectory.StartsWith($owned + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function ConvertTo-StackRollbackCommand {
@@ -230,6 +263,24 @@ function Get-StackTasks {
 
 function Get-StackProcesses {
     return @(Get-CimInstance Win32_Process -Filter "Name = '$($script:MonitorExecutable)' OR Name = '$($script:WebExecutable)'" -ErrorAction SilentlyContinue)
+}
+
+function Get-StackOwnedProcesses {
+    <# Same-named processes whose executable lives under one of the owned release directories. #>
+    param(
+        [Parameter(Mandatory)] [string]$ExecutableName,
+        [AllowEmptyCollection()] [AllowNull()] [string[]]$OwnedDirectories
+    )
+
+    $owned = @()
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name = '$ExecutableName'" -ErrorAction SilentlyContinue)) {
+        $pathProperty = $process.PSObject.Properties['ExecutablePath']
+        $executablePath = if ($null -eq $pathProperty) { '' } else { [string]$pathProperty.Value }
+        if (Test-StackProcessOwnership -ExecutablePath $executablePath -OwnedDirectories $OwnedDirectories) {
+            $owned += $process
+        }
+    }
+    return $owned
 }
 
 function Get-StackListenerPid {
@@ -436,10 +487,13 @@ function Register-StackTasks {
 }
 
 function Stop-StackComponent {
+    <# Stops the task and its own processes. Same-named executables outside the owned
+       release directories are preserved; a port that never frees refuses the cutover. #>
     param(
         $Task,
         [Parameter(Mandatory)] [string]$ExecutableName,
-        [Parameter(Mandatory)] [int]$Port
+        [Parameter(Mandatory)] [int]$Port,
+        [AllowEmptyCollection()] [AllowNull()] [string[]]$OwnedDirectories = @()
     )
 
     if ($null -ne $Task) {
@@ -448,15 +502,18 @@ function Stop-StackComponent {
     }
 
     $gone = Wait-StackCondition -Description "$ExecutableName exited and port $Port is free" -Seconds 20 -Condition {
-        $procs = @(Get-CimInstance Win32_Process -Filter "Name = '$ExecutableName'" -ErrorAction SilentlyContinue)
+        $procs = @(Get-StackOwnedProcesses -ExecutableName $ExecutableName -OwnedDirectories $OwnedDirectories)
         ($procs.Count -eq 0) -and ($null -eq (Get-StackListenerPid -Port $Port))
     }
     if (-not $gone) {
-        foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name = '$ExecutableName'" -ErrorAction SilentlyContinue)) {
-            Write-Warning "force-stopping $ExecutableName pid $($proc.ProcessId) (not owned by the task or slow to exit)"
+        foreach ($proc in @(Get-StackOwnedProcesses -ExecutableName $ExecutableName -OwnedDirectories $OwnedDirectories)) {
+            Write-Warning "force-stopping owned $ExecutableName pid $($proc.ProcessId) from $($proc.ExecutablePath)"
             Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
         }
-        $null = Wait-StackCondition -Description "port $Port is free" -Seconds 15 -Condition { $null -eq (Get-StackListenerPid -Port $Port) }
+        $portFree = Wait-StackCondition -Description "port $Port is free" -Seconds 15 -Condition { $null -eq (Get-StackListenerPid -Port $Port) }
+        if (-not $portFree) {
+            throw "port $Port is still occupied after stopping owned $ExecutableName processes; refusing to continue the cutover"
+        }
     }
 }
 
@@ -548,6 +605,38 @@ function Invoke-StackStatus {
     return 2
 }
 
+function Write-StackDeployFailure {
+    param(
+        [Parameter(Mandatory)] [string]$Message,
+        [AllowEmptyCollection()] [string[]]$Rollback
+    )
+
+    Write-Host "DEPLOY FAILED: $Message" -ForegroundColor Red
+    if ($Rollback.Count -gt 0) {
+        Write-Host 'Rollback (previous release is still on disk):' -ForegroundColor Yellow
+        foreach ($line in $Rollback) { Write-Host "  $line" }
+    }
+}
+
+function Restore-StackTaskActions {
+    <# Best-effort: re-points tasks the deploy already moved at the new release back
+       at their previous release, so a failed update cannot leave mixed versions. #>
+    param([AllowEmptyCollection()] [AllowNull()] [object[]]$Repointed)
+
+    foreach ($entry in @($Repointed)) {
+        if ($null -eq $entry) { continue }
+        if ([string]::IsNullOrWhiteSpace([string]$entry.ReleaseDirectory)) { continue }
+        $task = $entry.Task
+        try {
+            Set-StackTaskRelease -Task $task -ReleaseDirectory $entry.ReleaseDirectory -ExecutableName $entry.ExecutableName -Arguments ([string]$entry.Arguments)
+            Write-Detail "restored $($task.TaskPath)$($task.TaskName) -> $($entry.ReleaseDirectory)"
+        }
+        catch {
+            Write-Warning "could not restore $($task.TaskPath)$($task.TaskName) to $($entry.ReleaseDirectory): $($_.Exception.Message)"
+        }
+    }
+}
+
 function Invoke-StackDeploy {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     $startedAt = Get-Date
@@ -596,21 +685,8 @@ function Invoke-StackDeploy {
     Write-Detail ('Monitor {0}, Web {1}' -f (Get-StackExecutableVersion -Path (Join-Path $releaseDirectory $script:MonitorExecutable)), (Get-StackExecutableVersion -Path (Join-Path $releaseDirectory $script:WebExecutable)))
 
     Write-Step 'Stop (Web first so it cannot respawn the old Monitor)'
-    Stop-StackComponent -Task $tasks.Web -ExecutableName $script:WebExecutable -Port ([uri]$WebUrl).Port
-    Stop-StackComponent -Task $tasks.Monitor -ExecutableName $script:MonitorExecutable -Port $MonitorPort
-
-    Write-Step 'Point tasks at the new release'
-    if ($null -eq $tasks.Monitor) {
-        Register-StackTasks -Folder $TaskFolder -ReleaseDirectory $releaseDirectory -WebArguments $webArguments
-        $tasks = Get-StackTasks
-        if ($null -eq $tasks.Monitor -or $null -eq $tasks.Web) { throw 'task registration did not produce both tasks' }
-        Write-Detail "registered $($tasks.Monitor.TaskPath)Monitor and $($tasks.Web.TaskPath)Web"
-    }
-    else {
-        Set-StackTaskRelease -Task $tasks.Monitor -ReleaseDirectory $releaseDirectory -ExecutableName $script:MonitorExecutable
-        Set-StackTaskRelease -Task $tasks.Web -ReleaseDirectory $releaseDirectory -ExecutableName $script:WebExecutable -Arguments $webArguments
-        Write-Detail 'actions replaced; principals, triggers and settings untouched'
-    }
+    Stop-StackComponent -Task $tasks.Web -ExecutableName $script:WebExecutable -Port ([uri]$WebUrl).Port -OwnedDirectories @($previousWebRelease)
+    Stop-StackComponent -Task $tasks.Monitor -ExecutableName $script:MonitorExecutable -Port $MonitorPort -OwnedDirectories @($previousMonitorRelease)
 
     $rollback = @()
     if (-not [string]::IsNullOrWhiteSpace($previousMonitorRelease)) {
@@ -618,6 +694,29 @@ function Invoke-StackDeploy {
         $rollback += ConvertTo-StackRollbackCommand -TaskPath $tasks.Web.TaskPath -TaskName $tasks.Web.TaskName -ReleaseDirectory $previousWebRelease -ExecutableName $script:WebExecutable -Arguments $webArguments
         $rollback += "Stop-ScheduledTask -TaskPath '$($tasks.Web.TaskPath)' -TaskName '$($tasks.Web.TaskName)'; Stop-ScheduledTask -TaskPath '$($tasks.Monitor.TaskPath)' -TaskName '$($tasks.Monitor.TaskName)'"
         $rollback += "Start-ScheduledTask -TaskPath '$($tasks.Monitor.TaskPath)' -TaskName '$($tasks.Monitor.TaskName)'; Start-ScheduledTask -TaskPath '$($tasks.Web.TaskPath)' -TaskName '$($tasks.Web.TaskName)'"
+    }
+
+    $repointed = [System.Collections.Generic.List[object]]::new()
+    try {
+        Write-Step 'Point tasks at the new release'
+        if ($null -eq $tasks.Monitor) {
+            Register-StackTasks -Folder $TaskFolder -ReleaseDirectory $releaseDirectory -WebArguments $webArguments
+            $tasks = Get-StackTasks
+            if ($null -eq $tasks.Monitor -or $null -eq $tasks.Web) { throw 'task registration did not produce both tasks' }
+            Write-Detail "registered $($tasks.Monitor.TaskPath)Monitor and $($tasks.Web.TaskPath)Web"
+        }
+        else {
+            Set-StackTaskRelease -Task $tasks.Monitor -ReleaseDirectory $releaseDirectory -ExecutableName $script:MonitorExecutable
+            $repointed.Add([pscustomobject]@{ Task = $tasks.Monitor; ReleaseDirectory = $previousMonitorRelease; ExecutableName = $script:MonitorExecutable; Arguments = '' })
+            Set-StackTaskRelease -Task $tasks.Web -ReleaseDirectory $releaseDirectory -ExecutableName $script:WebExecutable -Arguments $webArguments
+            $repointed.Add([pscustomobject]@{ Task = $tasks.Web; ReleaseDirectory = $previousWebRelease; ExecutableName = $script:WebExecutable; Arguments = $webArguments })
+            Write-Detail 'actions replaced; principals, triggers and settings untouched'
+        }
+    }
+    catch {
+        Write-StackDeployFailure -Message $_.Exception.Message -Rollback $rollback
+        Restore-StackTaskActions -Repointed $repointed
+        throw
     }
 
     try {
@@ -640,11 +739,7 @@ function Invoke-StackDeploy {
         if (-not $webUp) { throw 'Web did not come up or does not see the Monitor' }
     }
     catch {
-        Write-Host "DEPLOY FAILED: $($_.Exception.Message)" -ForegroundColor Red
-        if ($rollback.Count -gt 0) {
-            Write-Host 'Rollback (previous release is still on disk):' -ForegroundColor Yellow
-            $rollback | ForEach-Object { Write-Host "  $_" }
-        }
+        Write-StackDeployFailure -Message $_.Exception.Message -Rollback $rollback
         throw
     }
 
