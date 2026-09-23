@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\scripts\Seeder\Seeder.csproj" />
     <ProjectReference Include="..\AIUsageTracker.Infrastructure\AIUsageTracker.Infrastructure.csproj" />
     <ProjectReference Include="..\AIUsageTracker.Core\AIUsageTracker.Core.csproj" />
     <ProjectReference Include="..\AIUsageTracker.Monitor\AIUsageTracker.Monitor.csproj" />
@@ -31,6 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\test-fixtures\provider-data.json" Link="TestData\provider-data.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="TestData\**\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

@@ -38,7 +38,8 @@ public class Program
             return 1;
         }
 
-        return SeedDatabase(seedPath);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return SeedDatabase(seedPath, Path.Combine(appData, "AIUsageTracker", "usage.db"));
     }
 
     private static string? ValidateFixturePath(string relativePath)
@@ -304,12 +305,12 @@ public class Program
         Console.WriteLine($"  7-day history: {fixture.History7Days.Count}");
     }
 
-    private static int SeedDatabase(string fixturePath)
+    public static int SeedDatabase(string fixturePath, string dbPath)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dbDir = Path.Combine(appData, "AIUsageTracker");
-        Directory.CreateDirectory(dbDir);
-        var dbPath = Path.Combine(dbDir, "usage.db");
+        ArgumentException.ThrowIfNullOrWhiteSpace(fixturePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
 
         if (File.Exists(dbPath))
         {
@@ -337,9 +338,10 @@ public class Program
 
         Console.WriteLine($"Fixture contains {fixture.Providers.Count} providers");
 
-        var connectionString = $"Data Source={dbPath}";
+        var connectionString = $"Data Source={dbPath};Pooling=False";
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
+        connection.Execute("PRAGMA foreign_keys = ON;");
 
         connection.Execute(@"
             CREATE TABLE providers (
@@ -409,6 +411,7 @@ public class Program
             CREATE INDEX IF NOT EXISTS idx_history_provider_fetched_desc ON provider_history(provider_id, fetched_at DESC);
         ");
 
+        var knownProviderIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var provider in fixture.Providers)
         {
             connection.Execute(
@@ -423,9 +426,24 @@ public class Program
                     IsActive = provider.IsActive,
                     Config = provider.ConfigJson,
                 });
+            if (!string.IsNullOrEmpty(provider.ProviderId))
+            {
+                knownProviderIds.Add(provider.ProviderId);
+            }
         }
 
         var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
+        foreach (var orphanId in historyToInsert
+            .Select(history => history.ProviderId)
+            .Where(id => !string.IsNullOrEmpty(id) && knownProviderIds.Add(id)))
+        {
+            connection.Execute(
+                @"
+                INSERT INTO providers (provider_id, provider_name, is_active, updated_at)
+                VALUES (@Id, @Name, 0, CURRENT_TIMESTAMP)",
+                new { Id = orphanId, Name = orphanId });
+        }
+
         foreach (var history in historyToInsert)
         {
             connection.Execute(

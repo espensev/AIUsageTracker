@@ -14,6 +14,7 @@
 ### Fixed
 
 - **Dashboard summary ignores suppressed providers** — the provider count and average usage on the Web dashboard no longer include providers listed in `SuppressedProviderIds`, matching the card filter.
+- **CI seeder keeps history rows whose provider metadata is gone** — exported `provider_history` can outlive `providers` rows; the seeder now inserts inactive stubs for those IDs so the Web smoke database satisfies the foreign key instead of aborting. Tests call `SeedDatabase` with an explicit path so they never touch the live `%LOCALAPPDATA%\AIUsageTracker\usage.db`.
 
 ### Security
 
