@@ -14,6 +14,7 @@
 | [release-process.md](release-process.md) | Beta/stable tags |
 | [test_fixture_sync.md](test_fixture_sync.md) | Fixture rules |
 | [wpf_async_best_practices.md](wpf_async_best_practices.md) | UI async |
+| [open-issues.md](open-issues.md) | Known code/doc gaps |
 | [adr/](adr/) | Accepted decisions still in force |
 | [card-catalog/](card-catalog/) | Card screenshot variants (`scripts/generate_card_catalog.ps1`) |
 | [scripts/debug-providers.md](../scripts/debug-providers.md) | API capture script |
