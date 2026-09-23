@@ -5,6 +5,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AIUsageTracker.Tests.Infrastructure;
+using Dapper;
 using Microsoft.Data.Sqlite;
 
 namespace AIUsageTracker.Tests;
@@ -46,26 +47,25 @@ public sealed class SeederTests
             Assert.Equal(0, Seeder.Program.SeedDatabase(fixturePath, database));
 
             using var connection = Open(database);
-            Assert.Equal(history.Length, Scalar(connection, "SELECT COUNT(*) FROM provider_history"));
-            Assert.Equal(providers.Length + missingIds.Length, Scalar(connection, "SELECT COUNT(*) FROM providers"));
-            Assert.Equal(0, Scalar(connection, "SELECT COUNT(*) FROM pragma_foreign_key_check"));
-            Assert.Equal("ok", Text(connection, "PRAGMA integrity_check"));
-            Assert.Equal(history.Length, Scalar(connection, "SELECT COUNT(*) FROM provider_history WHERE typeof(fetched_at) = 'integer'"));
+            Assert.Equal(history.Length, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history"));
+            Assert.Equal(providers.Length + missingIds.Length, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM providers"));
+            Assert.Equal(0, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM pragma_foreign_key_check"));
+            Assert.Equal("ok", connection.ExecuteScalar<string>("PRAGMA integrity_check"));
+            Assert.Equal(history.Length, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history WHERE typeof(fetched_at) = 'integer'"));
 
             foreach (var provider in providers)
             {
                 Assert.Equal(
                     provider.GetProperty("is_active").GetInt32(),
-                    Scalar(
-                        connection,
-                        "SELECT is_active FROM providers WHERE provider_id = $id",
-                        ("$id", provider.GetProperty("provider_id").GetString()!)));
+                    connection.ExecuteScalar<int>(
+                        "SELECT is_active FROM providers WHERE provider_id = @Id",
+                        new { Id = provider.GetProperty("provider_id").GetString()! }));
             }
 
             foreach (var id in missingIds)
             {
-                Assert.Equal(0, Scalar(connection, "SELECT is_active FROM providers WHERE provider_id = $id", ("$id", id!)));
-                Assert.Equal(1, Scalar(connection, "SELECT COUNT(*) FROM providers WHERE provider_id = $id AND provider_name = $id", ("$id", id!)));
+                Assert.Equal(0, connection.ExecuteScalar<int>("SELECT is_active FROM providers WHERE provider_id = @Id", new { Id = id! }));
+                Assert.Equal(1, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM providers WHERE provider_id = @Id AND provider_name = @Id", new { Id = id! }));
             }
         }
         finally
@@ -82,24 +82,5 @@ public sealed class SeederTests
         pragma.CommandText = "PRAGMA foreign_keys = ON;";
         pragma.ExecuteNonQuery();
         return connection;
-    }
-
-    private static int Scalar(SqliteConnection connection, string sql, params (string Name, object Value)[] parameters)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
-
-        return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    private static string Text(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToString(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
     }
 }
