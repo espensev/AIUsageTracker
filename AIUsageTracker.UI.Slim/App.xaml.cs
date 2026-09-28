@@ -33,6 +33,7 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private SingleInstanceLockService? _singleInstanceLockService;
+    private bool _isExiting;
 
     /// <summary>
     /// Gets the background task that ensures the monitor is running.
@@ -92,13 +93,18 @@ public partial class App : Application
 
     public void OpenInfoDialog() => this.ShowInfoDialogAction(this.InfoDialogFactory());
 
+    internal static bool ShouldActivateExistingInstance(IReadOnlyList<string> arguments) =>
+        !arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase) &&
+        !arguments.Contains("--test", StringComparer.OrdinalIgnoreCase) &&
+        !arguments.Contains("--screenshot", StringComparer.OrdinalIgnoreCase);
+
 #pragma warning disable VSTHRD100 // WPF Application lifecycle overrides require async void signatures
     protected override async void OnStartup(StartupEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
 
         this._singleInstanceLockService = Host.Services.GetRequiredService<SingleInstanceLockService>();
-        if (!this._singleInstanceLockService.TryAcquire())
+        if (!this._singleInstanceLockService.TryAcquire(ShouldActivateExistingInstance(e.Args)))
         {
             base.OnStartup(e);
             this.Shutdown(0);
@@ -152,10 +158,12 @@ public partial class App : Application
 
         this._mainWindow = Host.Services.GetRequiredService<MainWindow>();
         this._mainWindow.Show();
+        this._singleInstanceLockService.StartActivationListener(this.QueueMainWindowActivation);
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        this._isExiting = true;
         SystemEvents.UserPreferenceChanged -= this.OnSystemThemeChanged;
         this._trayIcon?.Dispose();
         foreach (var tray in this._providerTrayIcons.Values)
@@ -174,6 +182,20 @@ public partial class App : Application
         base.OnExit(e);
     }
 #pragma warning restore VSTHRD100
+
+    private void QueueMainWindowActivation()
+    {
+        if (!this.Dispatcher.HasShutdownStarted)
+        {
+            _ = this.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!this._isExiting)
+                {
+                    this.ShowMainWindow();
+                }
+            }));
+        }
+    }
 
     private void OnSystemThemeChanged(object sender, UserPreferenceChangedEventArgs e)
     {

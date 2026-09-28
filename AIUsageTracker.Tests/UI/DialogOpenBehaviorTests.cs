@@ -24,6 +24,35 @@ public class DialogOpenBehaviorTests
     private static readonly TimeSpan StaTestTimeout = TimeSpan.FromSeconds(15);
 
     [Fact]
+    public Task ShowMainWindow_RestoresHiddenMinimizedWindowAsync()
+    {
+        return RunInStaAsync(() =>
+        {
+            var app = EnsureAppCreated();
+            var mainWindow = CreateMainWindowForTesting();
+            app.SetMainWindowForTesting(mainWindow);
+
+            try
+            {
+                mainWindow.Show();
+                mainWindow.WindowState = WindowState.Minimized;
+                mainWindow.Hide();
+
+                InvokePrivateMethod(app, "ShowMainWindow");
+
+                Assert.True(mainWindow.IsVisible);
+                Assert.Equal(WindowState.Normal, mainWindow.WindowState);
+            }
+            finally
+            {
+                mainWindow.Close();
+            }
+
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public Task OpenSettingsDialogAsync_ShowsOwnedDialog_WithoutTopmostToggleAsync()
     {
         return RunInStaAsync(async () =>
