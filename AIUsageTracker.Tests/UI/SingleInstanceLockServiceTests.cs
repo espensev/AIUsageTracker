@@ -103,6 +103,15 @@ public class SingleInstanceLockServiceTests
         Assert.Equal(expected, App.ShouldActivateExistingInstance(string.IsNullOrEmpty(argument) ? [] : [argument]));
     }
 
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("--startup", false)]
+    [InlineData("--STARTUP", false)]
+    public void ShouldShowMainWindow_StartupStaysInTray(string argument, bool expected)
+    {
+        Assert.Equal(expected, App.ShouldShowMainWindow(string.IsNullOrEmpty(argument) ? [] : [argument]));
+    }
+
     [Fact]
     public void TryAcquire_WhenLockAlreadyHeldByAnotherInstance_ReturnsFalse()
     {

@@ -98,6 +98,9 @@ public partial class App : Application
         !arguments.Contains("--test", StringComparer.OrdinalIgnoreCase) &&
         !arguments.Contains("--screenshot", StringComparer.OrdinalIgnoreCase);
 
+    internal static bool ShouldShowMainWindow(IReadOnlyList<string> arguments) =>
+        !arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase);
+
 #pragma warning disable VSTHRD100 // WPF Application lifecycle overrides require async void signatures
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -157,7 +160,15 @@ public partial class App : Application
         this.InitializeTrayIcon();
 
         this._mainWindow = Host.Services.GetRequiredService<MainWindow>();
-        this._mainWindow.Show();
+        if (!ShouldShowMainWindow(e.Args))
+        {
+            await this._mainWindow.InitializeAsync().ConfigureAwait(true);
+        }
+        else
+        {
+            this._mainWindow.Show();
+        }
+
         this._singleInstanceLockService.StartActivationListener(this.QueueMainWindowActivation);
     }
 
