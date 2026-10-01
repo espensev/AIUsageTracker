@@ -22,4 +22,12 @@ public interface IAppPathProvider
 
     // Discovery root for external tools (e.g., .claude, .codex)
     string GetUserProfileRoot();
+
+    // Relocation overrides for those tools (e.g., CODEX_HOME, GROK_HOME, CLAUDE_CONFIG_DIR).
+    // Part of the same discovery seam: redirecting the profile root must not leave the
+    // host's own overrides in effect.
+    string? GetEnvironmentVariable(string name)
+    {
+        return Environment.GetEnvironmentVariable(name);
+    }
 }

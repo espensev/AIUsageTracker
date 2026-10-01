@@ -17,6 +17,8 @@ public sealed class SingleInstanceLockService
 
     private Mutex? _mutex;
     private bool _ownsMutex;
+    private EventWaitHandle? _activationEvent;
+    private RegisteredWaitHandle? _activationWait;
 
     public SingleInstanceLockService(ILogger<SingleInstanceLockService> logger)
         : this(MutexNameBuilder.BuildLocalName("AIUsageTracker_SlimUI_"), logger)
@@ -29,7 +31,7 @@ public sealed class SingleInstanceLockService
         this._logger = logger;
     }
 
-    public bool TryAcquire()
+    public bool TryAcquire(bool activateExistingInstance = false)
     {
         lock (this._sync)
         {
@@ -38,6 +40,9 @@ public sealed class SingleInstanceLockService
                 return true;
             }
 
+            // Create the event before the mutex so a duplicate launch during startup
+            // can leave a request pending until the owner's window is ready.
+            this._activationEvent ??= new EventWaitHandle(false, EventResetMode.AutoReset, this._mutexName + "_Activate");
             this._mutex ??= new Mutex(initiallyOwned: false, name: this._mutexName);
 
             try
@@ -58,9 +63,44 @@ public sealed class SingleInstanceLockService
                 return true;
             }
 
+            if (activateExistingInstance)
+            {
+                this._activationEvent.Set();
+            }
+
             this._logger.LogWarning("Duplicate Slim UI launch detected; exiting second instance.");
             UiDiagnosticFileLog.Write("[DIAGNOSTIC] Duplicate Slim UI launch detected; exiting second instance.");
             return false;
+        }
+    }
+
+    public void StartActivationListener(Action activate)
+    {
+        ArgumentNullException.ThrowIfNull(activate);
+
+        lock (this._sync)
+        {
+            if (!this._ownsMutex || this._activationEvent == null || this._activationWait != null)
+            {
+                throw new InvalidOperationException("Only the owning instance can start an activation listener, once.");
+            }
+
+            var activationEvent = this._activationEvent;
+            this._activationWait = ThreadPool.RegisterWaitForSingleObject(
+                activationEvent,
+                (_, _) =>
+                {
+                    lock (this._sync)
+                    {
+                        if (this._ownsMutex && ReferenceEquals(this._activationEvent, activationEvent))
+                        {
+                            activate();
+                        }
+                    }
+                },
+                null,
+                Timeout.Infinite,
+                executeOnlyOnce: false);
         }
     }
 
@@ -68,6 +108,11 @@ public sealed class SingleInstanceLockService
     {
         lock (this._sync)
         {
+            this._activationWait?.Unregister(null);
+            this._activationWait = null;
+            this._activationEvent?.Dispose();
+            this._activationEvent = null;
+
             if (this._ownsMutex && this._mutex != null)
             {
                 try

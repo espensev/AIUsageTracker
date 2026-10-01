@@ -261,7 +261,7 @@ public class PrivacyButtonBehaviorTests
             services.GetRequiredService<GitHubUpdateChecker>(),
             services.GetRequiredService<IDialogService>(),
             services.GetRequiredService<IBrowserService>(),
-            services.GetRequiredService<UiPreferencesStore>());
+            TestUiPreferencesStore.Create());
 
         EnsureThemeResourcesForTests();
         return window;
