@@ -263,6 +263,7 @@ public partial class App
             ContextMenu = contextMenu,
             DoubleClickCommand = new RelayCommand(this.ShowMainWindow),
         };
+        this._trayIcon.TrayLeftMouseDown += (_, _) => this.ShowMainWindow();
 
         if (!File.Exists(trayIconPath))
         {
@@ -279,7 +280,6 @@ public partial class App
             return;
         }
 
-        this._mainWindow.Show();
-        this._mainWindow.Activate();
+        this._mainWindow.ShowAndActivate();
     }
 }

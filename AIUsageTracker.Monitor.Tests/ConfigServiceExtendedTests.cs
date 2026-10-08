@@ -152,7 +152,7 @@ public sealed class ConfigServiceExtendedTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPreferencesAsync_ReturnsCachedOnSecondCall()
+    public async Task GetPreferencesAsync_ReturnsEquivalentValues_WhenFileIsUnchanged()
     {
         var first = await this._service.GetPreferencesAsync();
         var second = await this._service.GetPreferencesAsync();
@@ -172,6 +172,75 @@ public sealed class ConfigServiceExtendedTests : IDisposable
 
         var loaded = await this._service.GetPreferencesAsync();
         Assert.Contains("antigravity", loaded.SuppressedProviderIds);
+    }
+
+    [Fact]
+    public async Task GetConfigsAsync_OmitsSuppressedProvidersWithoutDeletingCredentialsAsync()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "auth.json"),
+            "{\"opencode-zen\":{\"key\":\"saved-key\"},\"groq\":{\"key\":\"retained-key\"}}");
+        await this.WriteProvidersJsonAsync("{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "prefs.json"),
+            "{\"SuppressedProviderIds\":[\"OPENCODE-ZEN\"]}");
+
+        var configs = await this._service.GetConfigsAsync();
+        Assert.DoesNotContain(configs, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+        Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+
+        await this._service.SaveConfigAsync(new ProviderConfig
+        {
+            ProviderId = "groq",
+            ApiKey = "retained-key",
+        });
+
+        var authJson = await File.ReadAllTextAsync(Path.Combine(this._tempDir, "auth.json"));
+        Assert.Contains("saved-key", authJson, StringComparison.Ordinal);
+
+        await this._service.SavePreferencesAsync(new AppPreferences());
+        var restored = await this._service.GetConfigsAsync();
+        Assert.Contains(restored, config => string.Equals(config.ProviderId, "opencode-zen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetConfigsAsync_ExternalPreferencesSaveUpdatesSuppressionWithoutRestartAsync()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "auth.json"),
+            "{\"groq\":{\"key\":\"retained-key\"}}");
+        await this.WriteProvidersJsonAsync("{}");
+        var preferencesPath = Path.Combine(this._tempDir, "prefs.json");
+        await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":[\"groq\"]}");
+        Assert.DoesNotContain(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+
+        // Settings saves the key over the API before writing preferences directly to disk.
+        await this._service.SaveConfigAsync(new ProviderConfig { ProviderId = "groq", ApiKey = "replacement-key" });
+        Assert.DoesNotContain(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":[]}");
+        Assert.Contains(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+
+        await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":[\"groq\"]}");
+        Assert.DoesNotContain(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+        Assert.Contains("replacement-key", await File.ReadAllTextAsync(Path.Combine(this._tempDir, "auth.json")), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("kimi", "kimi-for-coding")]
+    [InlineData("kimi-for-coding", "KIMI")]
+    public async Task GetConfigsAsync_SuppressedAliasHidesItsProviderFamilyAsync(string configuredId, string suppressedId)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "auth.json"),
+            JsonSerializer.Serialize(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) { [configuredId] = new { key = "retained-key" } }));
+        await this.WriteProvidersJsonAsync("{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "prefs.json"),
+            JsonSerializer.Serialize(new AppPreferences { SuppressedProviderIds = new[] { suppressedId } }));
+
+        Assert.DoesNotContain(
+            await this._service.GetConfigsAsync(),
+            config => string.Equals(config.ProviderId, configuredId, StringComparison.OrdinalIgnoreCase));
     }
 
 #pragma warning disable MA0004
@@ -212,5 +281,7 @@ public sealed class ConfigServiceExtendedTests : IDisposable
         public string GetMonitorInfoFilePath() => Path.Combine(this._root, "monitor.json");
 
         public string GetUserProfileRoot() => Path.Combine(this._root, "userprofile");
+
+        public string? GetEnvironmentVariable(string name) => null;
     }
 }

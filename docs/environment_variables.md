@@ -22,7 +22,19 @@
 | `XIAOMI_API_KEY`, `MIMO_API_KEY` | `xiaomi` |
 | `ZAI_API_KEY`, `Z_AI_API_KEY` | `zai-coding-plan` |
 
-No discovery env vars on: `antigravity`, `github-copilot`, `grok` (`%USERPROFILE%\.grok\auth.json`), `opencode-zen`.
+No API-key discovery env vars on: `antigravity`, `github-copilot`, `grok`, `opencode-zen`. Grok session paths support the CLI home override below.
+
+## CLI home overrides
+
+Session files follow the owning CLI's relocation variable, tried before the profile default. Any `%NAME%` token in `AuthIdentityCandidatePathTemplates` expands this way (`AuthPathTemplateResolver`); an unset variable drops that candidate. Discovery through `IAppPathProvider` uses its `GetEnvironmentVariable` method. Callers that redirect the profile root must also override that lookup to isolate CLI home variables; the default implementation reads the process environment. Provider credential refreshes read the process environment directly.
+
+| Variable | Provider id | Session file |
+|---|---|---|
+| `CLAUDE_CONFIG_DIR` | `claude-code` | `%CLAUDE_CONFIG_DIR%\.credentials.json` |
+| `CODEX_HOME` | `codex`, `codex.spark` | `%CODEX_HOME%\auth.json` |
+| `GROK_HOME` | `grok` | `%GROK_HOME%\auth.json` |
+
+The variable must be visible to the Monitor process; a scheduled task picks up a User-scope change on its next start.
 
 Persisted keys (`JsonConfigLoader.BuildConfigEntries`): later unique **auth** file wins. `GetAuthFilePath()` is `%USERPROFILE%\.opencode\auth.json`, which is also the first legacy OpenCode path, so de-dup keeps it first. Remaining unique order: `%USERPROFILE%\.config\opencode\auth.json`, `%APPDATA%\opencode\auth.json`, `%LOCALAPPDATA%\opencode\auth.json`, `%USERPROFILE%\.local\share\opencode\auth.json`, then `%LOCALAPPDATA%\AIUsageTracker\providers.json` (fills empty keys only; `IsAuthFile=false`), then `%LOCALAPPDATA%\AIUsageTracker\auth.json`.
 
