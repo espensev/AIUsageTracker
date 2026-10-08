@@ -21,12 +21,17 @@ namespace AIUsageTracker.Tests.UI;
 [Collection("WpfState")]
 public class DialogOpenBehaviorTests
 {
-    private static readonly TimeSpan StaTestTimeout = TimeSpan.FromSeconds(15);
+    private readonly WpfApplicationFixture _wpf;
+
+    public DialogOpenBehaviorTests(WpfApplicationFixture wpf)
+    {
+        this._wpf = wpf;
+    }
 
     [Fact]
     public Task ShowMainWindow_RestoresHiddenMinimizedWindowAsync()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var app = EnsureAppCreated();
             var mainWindow = CreateMainWindowForTesting();
@@ -55,7 +60,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task OpenSettingsDialogAsync_ShowsOwnedDialog_WithoutTopmostToggleAsync()
     {
-        return RunInStaAsync(async () =>
+        return this.RunInStaAsync(async () =>
         {
             var dialogService = new TestDialogService();
             var mainWindow = CreateMainWindowForTesting(dialogService);
@@ -73,7 +78,7 @@ public class DialogOpenBehaviorTests
                 return Task.FromResult<bool?>(false);
             };
 
-            await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(false);
+            await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(true);
 
             Assert.Equal(1, shown);
             Assert.True(mainWindow.Topmost);
@@ -85,7 +90,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task OpenInfoDialog_UsesConfiguredDialogHost_WhenMainWindowNotVisibleAsync()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var app = Application.Current as App ?? new App();
             var mainWindow = CreateMainWindowForTesting();
@@ -112,7 +117,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task CloseSettingsDialog_DoesNotMoveWindowPositionAsync()
     {
-        return RunInStaAsync(async () =>
+        return this.RunInStaAsync(async () =>
         {
             var dialogService = new TestDialogService
             {
@@ -137,7 +142,7 @@ public class DialogOpenBehaviorTests
             SetPrivateField(mainWindow, "_preferencesLoaded", true);
 
             // Open and close settings dialog
-            await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(false);
+            await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(true);
 
             // Verify window position hasn't changed
             Assert.Equal(initialLeft, mainWindow.Left);
@@ -150,7 +155,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task MainWindowAndSettingsWindow_ReflectSameShowUsedPreferenceAsync()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var preferences = new AppPreferences { ShowUsedPercentages = true };
             var mainWindow = CreateMainWindowForTesting();
@@ -178,7 +183,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task SettingsWindow_DisplayControlsApplyToPreferencesThroughSinglePathAsync()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var preferences = new AppPreferences
             {
@@ -233,7 +238,7 @@ public class DialogOpenBehaviorTests
     [Fact]
     public Task OpenSettingsDialogAsync_WhenSettingsChanged_ReloadsEnablePaceAdjustmentFromStoreAsync()
     {
-        return RunInStaAsync(async () =>
+        return this.RunInStaAsync(async () =>
         {
             var dialogService = new TestDialogService
             {
@@ -259,7 +264,7 @@ public class DialogOpenBehaviorTests
                     EnablePaceAdjustment = false,
                     ShowUsedPercentages = true,
                 };
-                await preferencesStore.SaveAsync(persisted).ConfigureAwait(false);
+                await preferencesStore.SaveAsync(persisted).ConfigureAwait(true);
 
                 SetPrivateField(mainWindow, "_preferences", new AppPreferences
                 {
@@ -275,7 +280,7 @@ public class DialogOpenBehaviorTests
                 // Avoid monitor startup work in this unit test; we only need the settings-change path.
                 SetPrivateField(mainWindow, "_isLoading", true);
 
-                await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(false);
+                await mainWindow.OpenSettingsDialogAsync().ConfigureAwait(true);
 
                 var reloaded = Assert.IsType<AppPreferences>(GetPrivateField(mainWindow, "_preferences"));
                 Assert.False(reloaded.EnablePaceAdjustment);
@@ -364,31 +369,14 @@ public class DialogOpenBehaviorTests
 
     private static void InvokePrivateMethod(object target, string methodName)
     {
-        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        var declaringType = target is App ? typeof(App) : target.GetType();
+        var method = declaringType.GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         method.Invoke(target, null);
     }
 
-    private static Task<object?> RunInStaAsync(Func<Task> testBody)
+    private Task RunInStaAsync(Func<Task> testBody)
     {
-        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                testBody().WaitAsync(StaTestTimeout).GetAwaiter().GetResult();
-                tcs.SetResult(null);
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        return tcs.Task;
+        return this._wpf.RunAsync(testBody);
     }
 }

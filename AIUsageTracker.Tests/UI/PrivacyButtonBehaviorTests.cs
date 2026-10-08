@@ -26,12 +26,17 @@ namespace AIUsageTracker.Tests.UI;
 [Collection("WpfState")]
 public class PrivacyButtonBehaviorTests
 {
-    private static readonly TimeSpan StaTestTimeout = TimeSpan.FromSeconds(15);
+    private readonly WpfApplicationFixture _wpf;
+
+    public PrivacyButtonBehaviorTests(WpfApplicationFixture wpf)
+    {
+        this._wpf = wpf;
+    }
 
     [Fact]
     public Task Diagnostic_OnPrivacyChanged_UpdatesIsPrivacyMode_WhenCalledDirectly()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var originalPrivacyMode = App.IsPrivacyMode;
 
@@ -68,7 +73,7 @@ public class PrivacyButtonBehaviorTests
     [Fact]
     public Task PrivacyBtn_Click_TogglesPrivacyModeOn_WhenCurrentlyOff()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var originalPrivacyMode = App.IsPrivacyMode;
 
@@ -109,7 +114,7 @@ public class PrivacyButtonBehaviorTests
     [Fact]
     public Task PrivacyBtn_Click_TogglesPrivacyModeOff_WhenCurrentlyOn()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var originalPrivacyMode = App.IsPrivacyMode;
 
@@ -150,7 +155,7 @@ public class PrivacyButtonBehaviorTests
     [Fact]
     public Task PrivacyBtn_Click_TogglesCorrectly_OnMultipleConsecutiveClicks()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var originalPrivacyMode = App.IsPrivacyMode;
 
@@ -199,7 +204,7 @@ public class PrivacyButtonBehaviorTests
     [Fact]
     public Task PrivacyBtn_Click_FiresPrivacyChangedEvent()
     {
-        return RunInStaAsync(() =>
+        return this.RunInStaAsync(() =>
         {
             var originalPrivacyMode = App.IsPrivacyMode;
 
@@ -310,28 +315,13 @@ public class PrivacyButtonBehaviorTests
         method.Invoke(target, parameters);
     }
 
-    private static Task<object?> RunInStaAsync(Func<Task> testBody)
+    private Task RunInStaAsync(Func<Task> testBody)
     {
-        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        var thread = new Thread(() =>
+        return this._wpf.RunAsync(() =>
         {
-            try
-            {
-                EnsureThemeResourcesForTests();
-                testBody().WaitAsync(StaTestTimeout).GetAwaiter().GetResult();
-                tcs.SetResult(null);
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
+            EnsureThemeResourcesForTests();
+            return testBody();
         });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        return tcs.Task;
     }
 
     private static void EnsureThemeResourcesForTests()
