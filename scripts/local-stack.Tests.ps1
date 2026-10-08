@@ -2,6 +2,7 @@
 # Run: pwsh -NoProfile -Command "Invoke-Pester -Path scripts/local-stack.Tests.ps1"
 
 BeforeAll {
+    Add-Type -AssemblyName System.Net.Http
     . (Join-Path $PSScriptRoot 'local-stack.ps1')
 }
 
@@ -21,6 +22,15 @@ Describe 'Get-StackWebHttpCode' {
         param($Status)
         $script:httpErrorStatus = $Status
         Mock Invoke-WebRequest {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                # HttpResponseException belongs to PowerShell 7; retain the same
+                # Response.StatusCode boundary when running the suite on 5.1.
+                $exception = [Exception]::new('The server returned an error.')
+                $exception | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{
+                    StatusCode = [System.Net.HttpStatusCode]$script:httpErrorStatus
+                })
+                throw $exception
+            }
             $response = [System.Net.Http.HttpResponseMessage]::new(
                 [System.Net.HttpStatusCode]$script:httpErrorStatus)
             throw [Microsoft.PowerShell.Commands.HttpResponseException]::new(
@@ -411,6 +421,108 @@ Describe 'Stack component stop scope' {
         Mock Stop-Process {} -RemoveParameterType Id -RemoveParameterValidation Id
 
         { Stop-StackComponent -Task $script:task -ExecutableName 'AIUsageTracker.Web.exe' -Port 5100 -OwnedDirectories @('C:\r\prev') } | Should -Throw '*port 5100*'
+    }
+}
+
+Describe 'Recovery preflight' {
+    BeforeEach {
+        $script:expectRecoveryRefusal = $true
+        $script:recoveryTasks = [pscustomobject]@{}
+        foreach ($fixtureComponent in @('Monitor', 'Web')) {
+            $previous = Join-Path $TestDrive $fixtureComponent
+            [void][IO.Directory]::CreateDirectory($previous)
+            $executable = Join-Path $previous "AIUsageTracker.$fixtureComponent.exe"
+            [IO.File]::WriteAllText($executable, 'fixture')
+            $script:recoveryTasks | Add-Member -NotePropertyName $fixtureComponent -NotePropertyValue ([pscustomobject]@{
+                TaskPath = '\SevGrp\AIUsageTracker\'; TaskName = $fixtureComponent
+                State = 'Ready'; Settings = [pscustomobject]@{ Enabled = $true }
+                Actions = @([pscustomobject]@{ Execute = $executable; Arguments = ''; WorkingDirectory = $previous })
+            })
+        }
+        Mock Write-Step {}
+        Mock Write-Detail {}
+        Mock Write-Host {}
+        Mock Get-StackGitState { [pscustomobject]@{ Sha = 'abcdef1234567890'; Branch = 'fixture'; Dirty = $false } }
+        Mock Get-Command { [pscustomobject]@{} } -ParameterFilter { $Name -eq 'dotnet' }
+        Mock Invoke-StackIdentityGate {}
+        Mock Get-StackTasks { $script:recoveryTasks }
+        Mock Get-ChildItem { @() }
+        Mock New-Item {}
+        Mock Publish-StackRelease { throw 'fixture: publish reached' }
+        Mock Stop-StackComponent { throw 'fixture: stop reached' }
+        Mock Set-StackTaskRelease { throw 'fixture: action replacement reached' }
+        Mock Register-StackTasks { throw 'fixture: registration reached' }
+        Mock Start-ScheduledTask { throw 'fixture: start reached' } -RemoveParameterType TaskPath, TaskName -RemoveParameterValidation TaskPath, TaskName
+    }
+
+    AfterEach {
+        if ($script:expectRecoveryRefusal) {
+            Should -Invoke New-Item -Times 0 -Exactly
+            Should -Invoke Publish-StackRelease -Times 0 -Exactly
+            Should -Invoke Stop-StackComponent -Times 0 -Exactly
+            Should -Invoke Set-StackTaskRelease -Times 0 -Exactly
+            Should -Invoke Register-StackTasks -Times 0 -Exactly
+            Should -Invoke Start-ScheduledTask -Times 0 -Exactly
+        }
+    }
+
+    It 'refuses disabled <Disabled> tasks before any deployment mutation' -ForEach @(
+        @{ Disabled = @('Monitor', 'Web') }
+        @{ Disabled = @('Monitor') }
+        @{ Disabled = @('Web') }
+    ) {
+        foreach ($component in $Disabled) { $script:recoveryTasks.$component.State = 'Disabled' }
+        $expectedTask = '\SevGrp\AIUsageTracker\' + $Disabled[0]
+        { & { $ReleaseRoot = Join-Path $TestDrive 'new-releases'; Invoke-StackDeploy } } |
+            Should -Throw "*$expectedTask*disabled*"
+    }
+
+    It 'also refuses a task disabled through its settings' {
+        $script:recoveryTasks.Web.Settings.Enabled = $false
+        { & { $ReleaseRoot = Join-Path $TestDrive 'new-releases'; Invoke-StackDeploy } } |
+            Should -Throw '*\SevGrp\AIUsageTracker\Web*disabled*'
+    }
+
+    It 'refuses a missing <Component> rollback <Missing> before any deployment mutation' -ForEach @(
+        @{ Component = 'Monitor'; Missing = 'directory' }
+        @{ Component = 'Web'; Missing = 'directory' }
+        @{ Component = 'Monitor'; Missing = 'executable' }
+        @{ Component = 'Web'; Missing = 'executable' }
+    ) {
+        $task = $script:recoveryTasks.$Component
+        if ($Missing -eq 'directory') {
+            $task.Actions[0].Execute = Join-Path (Join-Path $TestDrive 'absent-release') "AIUsageTracker.$Component.exe"
+        }
+        else {
+            [IO.File]::Delete($task.Actions[0].Execute)
+        }
+        { & { $ReleaseRoot = Join-Path $TestDrive 'new-releases'; Invoke-StackDeploy } } |
+            Should -Throw "*rollback*AIUsageTracker.$Component.exe*"
+    }
+
+    It 'still publishes and registers a first install when neither task exists' {
+        $script:expectRecoveryRefusal = $false
+        $script:recoveryRegistered = $false
+        Mock Get-StackTasks {
+            if ($script:recoveryRegistered) { return $script:recoveryTasks }
+            [pscustomobject]@{ Monitor = $null; Web = $null }
+        }
+        Mock Publish-StackRelease {}
+        Mock Test-StackRelease { @() }
+        Mock Get-StackExecutableVersion { 'fixture' }
+        Mock Stop-StackComponent {}
+        Mock Register-StackTasks { $script:recoveryRegistered = $true }
+        Mock Start-ScheduledTask {} -RemoveParameterType TaskPath, TaskName -RemoveParameterValidation TaskPath, TaskName
+        Mock Wait-StackCondition { $true }
+        Mock Get-StackWebStatus { [pscustomobject]@{ serviceHealth = 'healthy'; failingProviders = @() } }
+
+        & { $ReleaseRoot = Join-Path $TestDrive 'new-releases'; Invoke-StackDeploy } | Should -Be 0
+
+        Should -Invoke New-Item -Times 1 -Exactly
+        Should -Invoke Publish-StackRelease -Times 1 -Exactly
+        Should -Invoke Register-StackTasks -Times 1 -Exactly
+        Should -Invoke Set-StackTaskRelease -Times 0 -Exactly
+        Should -Invoke Start-ScheduledTask -Times 2 -Exactly
     }
 }
 

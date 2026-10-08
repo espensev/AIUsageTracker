@@ -15,20 +15,26 @@ using Moq.Protected;
 
 namespace AIUsageTracker.Tests.Core;
 
-public class MonitorServiceTests
+public sealed class MonitorServiceTests : IDisposable
 {
+    private readonly string _tempDirectory;
     private readonly Mock<HttpMessageHandler> _mockHandler;
     private readonly HttpClient _httpClient;
     private readonly MonitorService _service;
 
     public MonitorServiceTests()
     {
+        this._tempDirectory = TestTempPaths.CreateDirectory("monitor-service-tests");
         this._mockHandler = new Mock<HttpMessageHandler>();
         this._httpClient = new HttpClient(this._mockHandler.Object)
         {
             BaseAddress = new Uri("http://localhost:5000"),
         };
-        this._service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance);
+        var launcher = new MonitorLauncher(
+            monitorInfoCandidatePathsOverride: () => new[] { Path.Combine(this._tempDirectory, "monitor.json") },
+            healthCheckOverride: _ => Task.FromResult(false),
+            processRunningOverride: _ => Task.FromResult(false));
+        this._service = new MonitorService(this._httpClient, NullLogger<MonitorService>.Instance, launcher);
         this._service.AgentUrl = "http://localhost:5000";
     }
 
@@ -948,6 +954,11 @@ public class MonitorServiceTests
         var quotaBucket = Assert.Single(model.QuotaBuckets);
         Assert.Equal("effective", quotaBucket.BucketId);
         this.VerifyPath("/api/usage/grouped");
+    }
+
+    public void Dispose()
+    {
+        TestTempPaths.CleanupPath(this._tempDirectory);
     }
 
     private void SetupMockResponse(HttpStatusCode status, object body)
