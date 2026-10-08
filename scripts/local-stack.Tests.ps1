@@ -5,6 +5,32 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'local-stack.ps1')
 }
 
+Describe 'Get-StackWebHttpCode' {
+    It 'reports zero when PowerShell 7 cannot connect and the exception has no Response property' {
+        Mock Invoke-WebRequest {
+            throw [System.Net.Http.HttpRequestException]::new('Connection refused.')
+        }
+
+        Get-StackWebHttpCode -Url 'http://127.0.0.1:5100/' | Should -Be 0
+    }
+
+    It 'preserves the HTTP status from a server error response: <Status>' -TestCases @(
+        @{ Status = 401 }
+        @{ Status = 503 }
+    ) {
+        param($Status)
+        $script:httpErrorStatus = $Status
+        Mock Invoke-WebRequest {
+            $response = [System.Net.Http.HttpResponseMessage]::new(
+                [System.Net.HttpStatusCode]$script:httpErrorStatus)
+            throw [Microsoft.PowerShell.Commands.HttpResponseException]::new(
+                'The server returned an error.', $response)
+        }
+
+        Get-StackWebHttpCode -Url 'http://127.0.0.1:5100/' | Should -Be $Status
+    }
+}
+
 Describe 'Get-StackReleaseName' {
     It 'combines the short sha and the date' {
         $name = Get-StackReleaseName -CommitSha 'af688ee29c3f3f3826134555e905a18a57b3a7c7' -Timestamp ([datetime]'2026-09-21T10:15:00') -ExistingNames @()
