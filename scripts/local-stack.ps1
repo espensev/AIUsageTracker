@@ -15,7 +15,9 @@ The tasks are found by what they run (AIUsageTracker.Monitor.exe / AIUsageTracke
 When several tasks run the same executable the script refuses to act: ownership would be
 ambiguous. During stop, only processes launched from the tasks' own release directories are
 stopped; same-named executables elsewhere are preserved, and a port that never frees refuses
-the cutover. When no tasks exist they are created under -TaskFolder (default \SevGrp\AIUsageTracker\): Monitor at
+the cutover. Existing tasks must be enabled and retain their previous executables for rollback;
+otherwise deploy refuses before publishing or changing the stack. When no tasks exist they
+are created under -TaskFolder (default \SevGrp\AIUsageTracker\): Monitor at
 boot (S4U, no stored password), Web at logon (hidden), both restarting on failure.
 
 .EXAMPLE
@@ -162,6 +164,30 @@ function Get-StackTaskReleaseDirectory {
     if ($null -eq $taskAction) { return $null }
     $execute = (Get-StackActionExecute -ActionObject $taskAction).Trim('"')
     return Split-Path -Parent $execute
+}
+
+function Assert-StackTaskRecovery {
+    param($Task, [Parameter(Mandatory)][string]$ExecutableName)
+
+    if ($null -eq $Task) { return }
+    $taskIdentity = "$($Task.TaskPath)$($Task.TaskName)"
+    $state = $Task.PSObject.Properties['State']
+    $settings = $Task.PSObject.Properties['Settings']
+    $enabled = if ($null -ne $settings -and $null -ne $settings.Value) { $settings.Value.PSObject.Properties['Enabled'] } else { $null }
+    if (($null -ne $state -and [string]$state.Value -eq 'Disabled') -or
+        ($null -ne $enabled -and $enabled.Value -eq $false)) {
+        throw "task '$taskIdentity' is disabled; enable it through its owner before deploying"
+    }
+
+    $previousRelease = Get-StackTaskReleaseDirectory -Task $Task
+    if ([string]::IsNullOrWhiteSpace($previousRelease)) {
+        throw "task '$taskIdentity' has no rollback location for $ExecutableName; repair its action before deploying"
+    }
+    $rollbackExecutable = Join-Path $previousRelease $ExecutableName
+    if (-not (Test-Path -LiteralPath $previousRelease -PathType Container) -or
+        -not (Test-Path -LiteralPath $rollbackExecutable -PathType Leaf)) {
+        throw "task '$taskIdentity' rollback executable is missing: '$rollbackExecutable'; restore the previous release before deploying"
+    }
 }
 
 function Test-StackStatusPayload {
@@ -668,6 +694,8 @@ function Invoke-StackDeploy {
     if (($null -eq $tasks.Monitor) -ne ($null -eq $tasks.Web)) {
         throw 'found only one of the two stack tasks; fix or remove it before deploying'
     }
+    Assert-StackTaskRecovery -Task $tasks.Monitor -ExecutableName $script:MonitorExecutable
+    Assert-StackTaskRecovery -Task $tasks.Web -ExecutableName $script:WebExecutable
 
     if (-not (Test-Path -LiteralPath $ReleaseRoot -PathType Container)) {
         New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
