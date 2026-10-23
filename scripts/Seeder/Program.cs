@@ -12,11 +12,6 @@ namespace Seeder;
 
 public class Program
 {
-    private const string HistoryColumns = "provider_id, requests_used, requests_available, requests_percentage, " +
-        "is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms, " +
-        "http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id, " +
-        "group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc";
-
     public static int Main(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -234,8 +229,11 @@ public class Program
         var latestHistory = new List<HistoryFixture>();
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = $@"
-                SELECT {HistoryColumns}
+            cmd.CommandText = @"
+                SELECT provider_id, requests_used, requests_available, requests_percentage,
+                       is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms,
+                       http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id,
+                       group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY provider_id, COALESCE(card_id, '')
@@ -259,8 +257,11 @@ public class Program
         var history7Days = new List<HistoryFixture>();
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = $@"
-                SELECT {HistoryColumns}
+            cmd.CommandText = @"
+                SELECT provider_id, requests_used, requests_available, requests_percentage,
+                       is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms,
+                       http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id,
+                       group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc
                 FROM provider_history
                 WHERE fetched_at >= CAST(strftime('%s', 'now', '-7 days') AS INTEGER)
                 ORDER BY provider_id, fetched_at DESC";
@@ -480,8 +481,11 @@ public class Program
         foreach (var history in historyToInsert)
         {
             connection.Execute(
-                $@"
-                INSERT INTO provider_history ({HistoryColumns})
+                @"
+                INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage,
+                    is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms,
+                    http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id,
+                    group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc)
                 VALUES (@Id, @Used, @Avail, @Perc, @IsAvail, @Msg, @Next, @Fetched, @Details, @Latency,
                     @HttpStatus, @UpstreamResponseValidity, @UpstreamResponseNote, @ParentProviderId, @CardId,
                     @GroupId, @WindowKind, @ModelName, @Name, @CardType, @ResetCreditsAvailable, @ResetCreditExpirationsUtc)",
