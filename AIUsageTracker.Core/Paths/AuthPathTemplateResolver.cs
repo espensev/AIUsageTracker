@@ -32,6 +32,8 @@ public static class AuthPathTemplateResolver
         ArgumentNullException.ThrowIfNull(userProfileRoot);
         ArgumentNullException.ThrowIfNull(environmentLookup);
 
+        pathTemplate = pathTemplate.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+
         var resolved = new StringBuilder(pathTemplate.Length + userProfileRoot.Length);
         var position = 0;
 

@@ -85,6 +85,7 @@ public class ClaudeCodeProvider : ProviderBase
         // shared provider configuration must not hide a valid native OAuth token.
         var nativeToken = this.ReadFreshOAuthToken();
         var effectiveApiKey = nativeToken ?? config.ApiKey;
+        var effectiveAuthSource = nativeToken != null ? "Claude Code CLI session auth" : config.AuthSource;
         if (string.IsNullOrEmpty(effectiveApiKey))
         {
             return new[]
@@ -129,6 +130,18 @@ public class ClaudeCodeProvider : ProviderBase
             this._logger.LogDebug(ex, "OAuth usage endpoint not available, trying rate limit headers");
         }
 
+        // A rejected native session must not hide a separately configured API key.
+        // Keep transient failures and a duplicate/stale OAuth token on the native path.
+        if (nativeToken != null && failureStatus is 401 or 403 &&
+            !string.IsNullOrWhiteSpace(config.ApiKey) &&
+            !config.ApiKey.StartsWith("sk-ant-oat", StringComparison.Ordinal) &&
+            !string.Equals(nativeToken, config.ApiKey, StringComparison.Ordinal))
+        {
+            effectiveApiKey = config.ApiKey;
+            effectiveAuthSource = config.AuthSource;
+            isOAuthToken = false;
+        }
+
         // Skip the API rate-limit probe when the token is an OAuth token — it will
         // always return 401 because OAuth tokens are not API keys.
         if (!isOAuthToken)
@@ -138,6 +151,7 @@ public class ClaudeCodeProvider : ProviderBase
                 var (apiUsage, apiFailureStatus) = await this.GetUsageFromApiAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
                 if (apiUsage != null)
                 {
+                    apiUsage.AuthSource = effectiveAuthSource;
                     return new[] { apiUsage };
                 }
 
@@ -155,7 +169,7 @@ public class ClaudeCodeProvider : ProviderBase
         // Neither source answered. Report that rather than shelling out to the claude CLI:
         // it has no usage subcommand, so "claude usage" starts a full agent session.
         var unavailable = this.CreateUsageUnavailable(failureStatus, providerLabel);
-        unavailable.AuthSource = nativeToken != null ? "Claude Code CLI session auth" : config.AuthSource;
+        unavailable.AuthSource = effectiveAuthSource;
         return new[] { unavailable };
     }
 
@@ -248,44 +262,52 @@ public class ClaudeCodeProvider : ProviderBase
     /// </summary>
     private string? ReadFreshOAuthToken()
     {
-        try
+        return this.ReadFreshOAuthToken(this.GetCredentialsFileCandidates());
+    }
+
+    internal string? ReadFreshOAuthToken(IEnumerable<string> candidates)
+    {
+        foreach (var credentialsPath in candidates)
         {
-            var credentialsPath = this.GetCredentialsFileCandidates().FirstOrDefault(File.Exists);
-            if (credentialsPath == null)
+            if (!File.Exists(credentialsPath))
             {
-                return null;
+                continue;
             }
 
-            var json = File.ReadAllText(credentialsPath);
-            using var doc = JsonDocument.Parse(json);
-
-            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
-                !doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth) ||
-                oauth.ValueKind != JsonValueKind.Object)
+            try
             {
-                return null;
-            }
+                var json = File.ReadAllText(credentialsPath);
+                using var doc = JsonDocument.Parse(json);
 
-            if (!oauth.TryGetProperty("accessToken", out var tokenElement) ||
-                tokenElement.ValueKind != JsonValueKind.String)
+                if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                    !doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth) ||
+                    oauth.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (!oauth.TryGetProperty("accessToken", out var tokenElement) ||
+                    tokenElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var token = tokenElement.GetString();
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                this._logger.LogDebug("Re-read fresh OAuth token from credentials file ({Length} chars)", token.Length);
+                return token;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
-                return null;
+                this._logger.LogDebug(ex, "Failed to re-read OAuth token from credentials candidate");
             }
-
-            var token = tokenElement.GetString();
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return null;
-            }
-
-            this._logger.LogDebug("Re-read fresh OAuth token from credentials file ({Length} chars)", token.Length);
-            return token;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            this._logger.LogDebug(ex, "Failed to re-read OAuth token from credentials file");
-            return null;
-        }
+
+        return null;
     }
 
     private IEnumerable<string> GetCredentialsFileCandidates()
@@ -479,8 +501,15 @@ public class ClaudeCodeProvider : ProviderBase
                 return (usage, 0);
             }
 
-            // No rate limit headers found
-            return (null, testResponse.IsSuccessStatusCode ? 0 : (int)testResponse.StatusCode);
+            if (testResponse.IsSuccessStatusCode)
+            {
+                var unavailable = this.CreateUsageUnavailable(0, providerLabel);
+                unavailable.HttpStatus = (int)testResponse.StatusCode;
+                return (unavailable, 0);
+            }
+
+            // No rate limit headers found in a failed API response.
+            return (null, (int)testResponse.StatusCode);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {

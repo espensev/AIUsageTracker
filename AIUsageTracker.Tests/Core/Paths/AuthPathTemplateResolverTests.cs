@@ -10,6 +10,15 @@ public class AuthPathTemplateResolverTests
 {
     private const string UserProfileRoot = @"C:\Users\tester";
 
+    [Fact]
+    public void Resolve_MixedTemplateSeparators_UsesNativePathSeparators()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "provider-home");
+        var resolved = AuthPathTemplateResolver.Resolve(@"%CODEX_HOME%/state\auth.json", root, _ => root);
+
+        Assert.Equal(Path.Combine(root, "state", "auth.json"), resolved);
+    }
+
     [Theory]
     [InlineData(@"%USERPROFILE%\.grok\auth.json", @"C:\Users\tester\.grok\auth.json")]
     [InlineData(@"%APPDATA%\codex\auth.json", @"C:\Users\tester\AppData\Roaming\codex\auth.json")]
