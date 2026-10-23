@@ -194,6 +194,40 @@ public class WebDatabaseServiceTests
         Assert.AreEqual(0, providers.Count);
     }
 
+    [TestMethod]
+    public async Task OnGetAsync_SuppressedOwner_HidesCoReportedCardsAndSummaryAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+INSERT INTO providers (provider_id, provider_name, is_active) VALUES ('codex.spark', 'Spark', 1);
+INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage,
+    is_available, status_message, response_latency_ms, fetched_at)
+VALUES ('codex.spark', 10, 100, 10, 1, 'ok', 100, '2026-03-10 10:00:00');";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var preferences = new PreferencesStore(NullLogger<PreferencesStore>.Instance, new TestAppPathProvider(databasePath));
+        Assert.IsTrue(await preferences.SaveAsync(new AppPreferences { SuppressedProviderIds = ["openai", "claude", "codex"] }));
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+        var model = new IndexModel(service, new UsageAnalyticsService(service, cache, NullLogger<UsageAnalyticsService>.Instance), preferences)
+        {
+            PageContext = new PageContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        await model.OnGetAsync(showUsed: null);
+
+        Assert.IsNotNull(model.LatestUsage);
+        Assert.IsNotNull(model.Summary);
+        Assert.AreEqual(0, model.LatestUsage.Count);
+        Assert.AreEqual(0, model.Summary.ProviderCount);
+        Assert.AreEqual(3, (await service.GetLatestUsageAsync(includeInactive: true)).Count);
+    }
+
     private WebDatabaseService CreateService(string databasePath, IMemoryCache cache)
     {
         return new WebDatabaseService(

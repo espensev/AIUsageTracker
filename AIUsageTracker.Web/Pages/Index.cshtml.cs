@@ -268,7 +268,7 @@ public class IndexModel : PageModel
         var prefs = await this._preferencesStore.LoadAsync().ConfigureAwait(false);
         this.ColorThresholdYellow = prefs.ColorThresholdYellow;
         this.ColorThresholdRed = prefs.ColorThresholdRed;
-        this._suppressedProviderIds.UnionWith(prefs.SuppressedProviderIds.Select(ProviderMetadataCatalog.GetProviderOwnerId));
+        this._suppressedProviderIds.UnionWith(ProviderMetadataCatalog.GetSuppressedProviderIds(prefs.SuppressedProviderIds));
     }
 
     private void SetBooleanCookie(string name, bool value)

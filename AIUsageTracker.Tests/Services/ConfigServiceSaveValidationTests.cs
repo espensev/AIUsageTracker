@@ -2,6 +2,7 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using System.Text.Json;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Monitor.Services;
@@ -53,6 +54,54 @@ public sealed class ConfigServiceSaveValidationTests : IntegrationTestBase
 
         var exception = await Record.ExceptionAsync(() => service.SaveConfigAsync(config));
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task SaveConfigAsync_ReaddedProvider_ClearsSuppressionAfterPersistenceAsync()
+    {
+        var service = this.CreateConfigService();
+        await File.WriteAllTextAsync(
+            Path.Combine(this.TestRootPath, "preferences.json"),
+            JsonSerializer.Serialize(new AppPreferences { SuppressedProviderIds = ["CLAUDE-CODE", "groq"], FontSize = 23 }));
+
+        await service.SaveConfigAsync(new ProviderConfig { ProviderId = "claude-code", ApiKey = Guid.NewGuid().ToString() });
+
+        var preferences = await service.GetPreferencesAsync();
+        Assert.Equal(new[] { "groq" }, preferences.SuppressedProviderIds);
+        Assert.Equal(23, preferences.FontSize);
+        Assert.Contains(await service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "claude-code", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SaveConfigAsync_PersistenceFails_RetainsSuppressionAsync()
+    {
+        var service = this.CreateConfigService();
+        await File.WriteAllTextAsync(
+            Path.Combine(this.TestRootPath, "preferences.json"),
+            JsonSerializer.Serialize(new AppPreferences { SuppressedProviderIds = ["claude-code"] }));
+        var providerPath = Path.Combine(this.TestRootPath, "config", "providers.json");
+        File.Delete(providerPath);
+        Directory.CreateDirectory(providerPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveConfigAsync(
+            new ProviderConfig { ProviderId = "claude-code", ApiKey = Guid.NewGuid().ToString() }));
+
+        Assert.Equal(new[] { "claude-code" }, (await service.GetPreferencesAsync()).SuppressedProviderIds);
+    }
+
+    [Fact]
+    public async Task SaveConfigAsync_CoReportedProvider_ReenablesItsSuppressedOwnerAsync()
+    {
+        var service = this.CreateConfigService();
+        var config = new ProviderConfig { ProviderId = "codex.spark", ApiKey = Guid.NewGuid().ToString() };
+        await service.SaveConfigAsync(config);
+        await service.SavePreferencesAsync(new AppPreferences { SuppressedProviderIds = ["codex", "groq"] });
+        Assert.DoesNotContain(await service.GetConfigsAsync(), item => string.Equals(item.ProviderId, "codex.spark", StringComparison.Ordinal));
+
+        await service.SaveConfigAsync(config);
+
+        Assert.Equal(new[] { "groq" }, (await service.GetPreferencesAsync()).SuppressedProviderIds);
+        Assert.Contains(await service.GetConfigsAsync(), item => string.Equals(item.ProviderId, "codex.spark", StringComparison.Ordinal));
     }
 
     [Fact]

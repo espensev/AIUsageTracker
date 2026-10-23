@@ -12,6 +12,18 @@ namespace AIUsageTracker.Tests.Infrastructure;
 public class ProviderMetadataCatalogTests
 {
     [Fact]
+    public void GetSuppressedProviderIds_ExpandsDeclaredCoReportedProvidersWithoutChangingOwnership()
+    {
+        var suppressed = ProviderMetadataCatalog.GetSuppressedProviderIds(new[] { "CODEX", "grok-cli" });
+
+        Assert.Contains("codex", suppressed);
+        Assert.Contains("codex.spark", suppressed);
+        Assert.Contains("grok", suppressed);
+        Assert.Equal("codex.spark", ProviderMetadataCatalog.GetProviderOwnerId("codex.spark"));
+        Assert.DoesNotContain("openai", suppressed);
+    }
+
+    [Fact]
     public void Definitions_AreDiscoveredFromProviderClasses()
     {
         var expectedProviderIds = typeof(AIUsageTracker.Infrastructure.Providers.GroqProvider).Assembly

@@ -42,9 +42,7 @@ public class ConfigService : IConfigService
     {
         var configs = await this.GetLoadedConfigsAsync().ConfigureAwait(false);
         var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
-        var suppressed = prefs.SuppressedProviderIds
-            .Select(ProviderMetadataCatalog.GetProviderOwnerId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var suppressed = ProviderMetadataCatalog.GetSuppressedProviderIds(prefs.SuppressedProviderIds);
         var visibleConfigs = configs
             .Where(config => !suppressed.Contains(ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId)))
             .ToList();
@@ -122,6 +120,17 @@ public class ConfigService : IConfigService
 
             await this._configLoader.SaveConfigAsync(configs).ConfigureAwait(false);
             Volatile.Write<IReadOnlyList<ProviderConfig>?>(ref this._cachedConfigs, null);
+            var preferences = await this.GetPreferencesAsync().ConfigureAwait(false);
+            var ownerId = ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId);
+            var remainingSuppression = preferences.SuppressedProviderIds
+                .Where(id => !ProviderMetadataCatalog.GetSuppressedProviderIds(new[] { id }).Contains(ownerId))
+                .ToList();
+            if (remainingSuppression.Count != preferences.SuppressedProviderIds.Count)
+            {
+                preferences.SuppressedProviderIds = remainingSuppression;
+                await this.SavePreferencesAsync(preferences).ConfigureAwait(false);
+            }
+
             this._logger.LogInformation("Saved: {ProviderId}", config.ProviderId);
         }
         catch (Exception ex)
@@ -184,9 +193,7 @@ public class ConfigService : IConfigService
             var discovered = await this._tokenDiscovery.DiscoverTokensAsync().ConfigureAwait(false);
             var existing = (await this._configLoader.LoadConfigAsync().ConfigureAwait(false)).ToList();
             var prefs = await this.GetPreferencesAsync().ConfigureAwait(false);
-            var suppressed = prefs.SuppressedProviderIds
-                .Select(ProviderMetadataCatalog.GetProviderOwnerId)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var suppressed = ProviderMetadataCatalog.GetSuppressedProviderIds(prefs.SuppressedProviderIds);
             var discoveredWithKeys = discovered
                 .Where(config => !string.IsNullOrWhiteSpace(config.ApiKey))
                 .ToList();

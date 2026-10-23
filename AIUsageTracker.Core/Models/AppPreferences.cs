@@ -163,6 +163,7 @@ public class AppPreferences
             preferences = JsonSerializer.Deserialize<AppPreferences>(json, lenientOptions) ?? new AppPreferences();
         }
 
+        preferences.SuppressedProviderIds ??= new List<string>();
         preferences.ApplyMigrations(json);
         preferences.SchemaVersion = CurrentSchemaVersion;
         return preferences;

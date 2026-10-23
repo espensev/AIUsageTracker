@@ -214,9 +214,10 @@ public sealed class ConfigServiceExtendedTests : IDisposable
         await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":[\"groq\"]}");
         Assert.DoesNotContain(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
 
-        // Settings saves the key over the API before writing preferences directly to disk.
+        // A successful explicit key save re-enables the provider for every API client.
+        // Later preference writes still change visibility without restarting the service.
         await this._service.SaveConfigAsync(new ProviderConfig { ProviderId = "groq", ApiKey = "replacement-key" });
-        Assert.DoesNotContain(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+        Assert.Contains(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
         await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":[]}");
         Assert.Contains(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
 

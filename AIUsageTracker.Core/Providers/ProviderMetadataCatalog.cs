@@ -60,6 +60,26 @@ public static class ProviderMetadataCatalog
         return Find(providerId)?.ProviderId ?? providerId;
     }
 
+    public static HashSet<string> GetSuppressedProviderIds(IEnumerable<string> providerIds)
+    {
+        var suppressed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>(providerIds.Select(GetProviderOwnerId));
+        while (pending.TryDequeue(out var providerId))
+        {
+            if (!suppressed.Add(providerId))
+            {
+                continue;
+            }
+
+            foreach (var coReported in Find(providerId)?.CoReportedProviderIds ?? Array.Empty<string>())
+            {
+                pending.Enqueue(GetProviderOwnerId(coReported));
+            }
+        }
+
+        return suppressed;
+    }
+
     public static string GetConfiguredDisplayName(string providerId)
     {
         var definition = Find(providerId);
