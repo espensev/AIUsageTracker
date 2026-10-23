@@ -14,7 +14,7 @@ namespace AIUsageTracker.Monitor.Services;
 public class ConfigService : IConfigService
 {
     private readonly ILogger<ConfigService> _logger;
-    private readonly JsonConfigLoader _configLoader;
+    private readonly IConfigLoader _configLoader;
     private readonly TokenDiscoveryService _tokenDiscovery;
     private readonly IAppPathProvider _pathProvider;
     private readonly SemaphoreSlim _configCacheLock = new(1, 1);
@@ -27,14 +27,19 @@ public class ConfigService : IConfigService
     }
 
     public ConfigService(ILogger<ConfigService> logger, ILoggerFactory loggerFactory, IAppPathProvider pathProvider)
+        : this(logger, loggerFactory, pathProvider, new JsonConfigLoader(
+            logger: loggerFactory.CreateLogger<JsonConfigLoader>(),
+            tokenDiscoveryLogger: loggerFactory.CreateLogger<TokenDiscoveryService>(),
+            pathProvider: pathProvider))
+    {
+    }
+
+    internal ConfigService(ILogger<ConfigService> logger, ILoggerFactory loggerFactory, IAppPathProvider pathProvider, IConfigLoader configLoader)
     {
         this._logger = logger;
         this._pathProvider = pathProvider;
         var tokenDiscoveryLogger = loggerFactory.CreateLogger<TokenDiscoveryService>();
-        this._configLoader = new JsonConfigLoader(
-            logger: loggerFactory.CreateLogger<JsonConfigLoader>(),
-            tokenDiscoveryLogger: tokenDiscoveryLogger,
-            pathProvider: this._pathProvider);
+        this._configLoader = configLoader;
         this._tokenDiscovery = new TokenDiscoveryService(tokenDiscoveryLogger, this._pathProvider);
     }
 
@@ -102,6 +107,9 @@ public class ConfigService : IConfigService
 
         try
         {
+            // A mutation must fail if existing visibility preferences cannot be read.
+            // GetPreferencesAsync intentionally falls back only for read-only consumers.
+            var preferences = await this._configLoader.LoadPreferencesAsync().ConfigureAwait(false);
             var configs = (await this._configLoader.LoadConfigAsync().ConfigureAwait(false)).ToList();
 
             // Update or add
@@ -120,7 +128,6 @@ public class ConfigService : IConfigService
 
             await this._configLoader.SaveConfigAsync(configs).ConfigureAwait(false);
             Volatile.Write<IReadOnlyList<ProviderConfig>?>(ref this._cachedConfigs, null);
-            var preferences = await this.GetPreferencesAsync().ConfigureAwait(false);
             var ownerId = ProviderMetadataCatalog.GetProviderOwnerId(config.ProviderId);
             var remainingSuppression = preferences.SuppressedProviderIds
                 .Where(id => !ProviderMetadataCatalog.GetSuppressedProviderIds(new[] { id }).Contains(ownerId))
