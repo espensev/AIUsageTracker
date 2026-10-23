@@ -12,6 +12,11 @@ namespace Seeder;
 
 public class Program
 {
+    private const string HistoryColumns = "provider_id, requests_used, requests_available, requests_percentage, " +
+        "is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms, " +
+        "http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id, " +
+        "group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc";
+
     public static int Main(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -56,10 +61,11 @@ public class Program
         return fullPath;
     }
 
-    private static int PrintStats()
+    public static int PrintStats(string? databasePath = null, TextWriter? output = null)
     {
+        output ??= Console.Out;
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dbPath = Path.Combine(appData, "AIUsageTracker", "usage.db");
+        var dbPath = databasePath ?? Path.Combine(appData, "AIUsageTracker", "usage.db");
 
         if (!File.Exists(dbPath))
         {
@@ -68,11 +74,11 @@ public class Program
         }
 
         var fileSize = new FileInfo(dbPath).Length;
-        Console.WriteLine($"DB file: {dbPath}");
-        Console.WriteLine($"File size: {fileSize / 1024.0 / 1024.0:F1} MB");
-        Console.WriteLine();
+        output.WriteLine($"DB file: {dbPath}");
+        output.WriteLine($"File size: {fileSize / 1024.0 / 1024.0:F1} MB");
+        output.WriteLine();
 
-        var connectionString = $"Data Source={dbPath};Mode=ReadOnly";
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString();
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
 
@@ -82,8 +88,8 @@ public class Program
             cmd.CommandText = @"
                 SELECT
                     COUNT(*) as total_rows,
-                    MIN(fetched_at) as oldest,
-                    MAX(fetched_at) as newest,
+                    MIN(datetime(fetched_at, 'unixepoch')) as oldest,
+                    MAX(datetime(fetched_at, 'unixepoch')) as newest,
                     AVG(CASE WHEN details_json IS NOT NULL THEN LENGTH(details_json) ELSE 0 END) as avg_details_bytes,
                     SUM(CASE WHEN details_json IS NOT NULL THEN LENGTH(details_json) ELSE 0 END) as total_details_bytes,
                     COUNT(DISTINCT provider_id) as provider_count
@@ -91,74 +97,74 @@ public class Program
             using var reader = cmd.ExecuteReader();
             if (reader.Read())
             {
-                Console.WriteLine($"Total rows:      {reader.GetInt64(0):N0}");
-                Console.WriteLine($"Oldest entry:    {reader.GetString(1)}");
-                Console.WriteLine($"Newest entry:    {reader.GetString(2)}");
-                Console.WriteLine($"Providers:       {reader.GetInt64(5)}");
-                Console.WriteLine($"Avg details_json:{reader.GetDouble(3):F0} bytes");
-                Console.WriteLine($"Total details:   {reader.GetInt64(4) / 1024.0 / 1024.0:F1} MB");
+                output.WriteLine($"Total rows:      {reader.GetInt64(0):N0}");
+                output.WriteLine($"Oldest entry:    {reader.GetString(1)}");
+                output.WriteLine($"Newest entry:    {reader.GetString(2)}");
+                output.WriteLine($"Providers:       {reader.GetInt64(5)}");
+                output.WriteLine($"Avg details_json:{reader.GetDouble(3):F0} bytes");
+                output.WriteLine($"Total details:   {reader.GetInt64(4) / 1024.0 / 1024.0:F1} MB");
             }
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Rows per provider:");
+        output.WriteLine();
+        output.WriteLine("Rows per provider:");
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"
                 SELECT provider_id, COUNT(*) as cnt,
-                       MIN(fetched_at) as oldest,
-                       MAX(fetched_at) as newest
+                       MIN(datetime(fetched_at, 'unixepoch')) as oldest,
+                       MAX(datetime(fetched_at, 'unixepoch')) as newest
                 FROM provider_history
                 GROUP BY provider_id
                 ORDER BY cnt DESC";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                Console.WriteLine($"  {reader.GetString(0),-30} {reader.GetInt64(1),8:N0}  ({reader.GetString(2)[..10]} → {reader.GetString(3)[..10]})");
+                output.WriteLine($"  {reader.GetString(0),-30} {reader.GetInt64(1),8:N0}  ({reader.GetString(2)[..10]} → {reader.GetString(3)[..10]})");
             }
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Rows per day (last 30 days):");
+        output.WriteLine();
+        output.WriteLine("Rows per day (last 30 days):");
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"
-                SELECT DATE(fetched_at) as day, COUNT(*) as cnt
+                SELECT DATE(fetched_at, 'unixepoch') as day, COUNT(*) as cnt
                 FROM provider_history
-                WHERE fetched_at >= datetime('now', '-30 days')
+                WHERE fetched_at >= CAST(strftime('%s', 'now', '-30 days') AS INTEGER)
                 GROUP BY day
                 ORDER BY day DESC";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                Console.WriteLine($"  {reader.GetString(0)}  {reader.GetInt64(1),6:N0}");
+                output.WriteLine($"  {reader.GetString(0)}  {reader.GetInt64(1),6:N0}");
             }
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Rows per month (older than 30 days):");
+        output.WriteLine();
+        output.WriteLine("Rows per month (older than 30 days):");
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"
-                SELECT strftime('%Y-%m', fetched_at) as month, COUNT(*) as cnt
+                SELECT strftime('%Y-%m', fetched_at, 'unixepoch') as month, COUNT(*) as cnt
                 FROM provider_history
-                WHERE fetched_at < datetime('now', '-30 days')
+                WHERE fetched_at < CAST(strftime('%s', 'now', '-30 days') AS INTEGER)
                 GROUP BY month
                 ORDER BY month DESC";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
-                Console.WriteLine($"  {reader.GetString(0)}  {reader.GetInt64(1),8:N0}");
+                output.WriteLine($"  {reader.GetString(0)}  {reader.GetInt64(1),8:N0}");
             }
         }
 
         return 0;
     }
 
-    private static int ExportData(string outputPath)
+    public static int ExportData(string outputPath, string? databasePath = null)
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dbPath = Path.Combine(appData, "AIUsageTracker", "usage.db");
+        var dbPath = databasePath ?? Path.Combine(appData, "AIUsageTracker", "usage.db");
 
         if (!File.Exists(dbPath))
         {
@@ -168,7 +174,7 @@ public class Program
 
         Console.WriteLine($"Reading from: {dbPath}");
 
-        var connectionString = $"Data Source={dbPath}";
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString();
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
 
@@ -228,17 +234,16 @@ public class Program
         var latestHistory = new List<HistoryFixture>();
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = @"
-                SELECT h.provider_id, h.requests_used, h.requests_available, h.requests_percentage, 
-                       h.is_available, h.status_message, h.next_reset_time, h.fetched_at, h.details_json,
-                       h.response_latency_ms
-                FROM provider_history h
-                INNER JOIN (
-                    SELECT provider_id, MAX(fetched_at) as max_fetched
+            cmd.CommandText = $@"
+                SELECT {HistoryColumns}
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY provider_id, COALESCE(card_id, '')
+                        ORDER BY fetched_at DESC, id DESC) AS row_rank
                     FROM provider_history
-                    GROUP BY provider_id
-                ) latest ON h.provider_id = latest.provider_id AND h.fetched_at = latest.max_fetched
-                ORDER BY h.provider_id";
+                ) latest
+                WHERE row_rank = 1
+                ORDER BY provider_id, card_id";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
@@ -254,12 +259,10 @@ public class Program
         var history7Days = new List<HistoryFixture>();
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = @"
-                SELECT provider_id, requests_used, requests_available, requests_percentage,
-                       is_available, status_message, next_reset_time, fetched_at, details_json,
-                       response_latency_ms
+            cmd.CommandText = $@"
+                SELECT {HistoryColumns}
                 FROM provider_history
-                WHERE fetched_at >= datetime('now', '-7 days')
+                WHERE fetched_at >= CAST(strftime('%s', 'now', '-7 days') AS INTEGER)
                 ORDER BY provider_id, fetched_at DESC";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
@@ -282,9 +285,21 @@ public class Program
             IsAvailable = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
             StatusMessage = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
             NextResetTime = reader.IsDBNull(6) ? null : reader.GetString(6),
-            FetchedAt = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+            FetchedAt = reader.IsDBNull(7) ? string.Empty : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)).ToString("o", CultureInfo.InvariantCulture),
             DetailsJson = reader.IsDBNull(8) ? null : reader.GetString(8),
             ResponseLatencyMs = reader.IsDBNull(9) ? 0 : reader.GetDouble(9),
+            HttpStatus = reader.GetInt32(10),
+            UpstreamResponseValidity = reader.GetInt32(11),
+            UpstreamResponseNote = reader.GetString(12),
+            ParentProviderId = reader.IsDBNull(13) ? null : reader.GetString(13),
+            CardId = reader.IsDBNull(14) ? null : reader.GetString(14),
+            GroupId = reader.IsDBNull(15) ? null : reader.GetString(15),
+            WindowKind = reader.GetInt32(16),
+            ModelName = reader.IsDBNull(17) ? null : reader.GetString(17),
+            Name = reader.IsDBNull(18) ? null : reader.GetString(18),
+            CardType = reader.IsDBNull(19) ? null : reader.GetString(19),
+            ResetCreditsAvailable = reader.IsDBNull(20) ? null : reader.GetInt32(20),
+            ResetCreditExpirationsUtc = reader.IsDBNull(21) ? null : reader.GetString(21),
         };
     }
 
@@ -307,15 +322,6 @@ public class Program
 
     public static int SeedDatabase(string fixturePath, string dbPath)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
-
-        if (File.Exists(dbPath))
-        {
-            File.Delete(dbPath);
-        }
-
-        Console.WriteLine($"Creating database at: {dbPath}");
-
         if (!File.Exists(fixturePath))
         {
             Console.Error.WriteLine($"Fixture file not found: {fixturePath}");
@@ -324,16 +330,36 @@ public class Program
         }
 
         Console.WriteLine($"Loading fixture from: {fixturePath}");
-        var json = File.ReadAllText(fixturePath);
-        var fixture = JsonSerializer.Deserialize<TestDataFixture>(json);
+        TestDataFixture? fixture;
+        try
+        {
+            fixture = JsonSerializer.Deserialize<TestDataFixture>(File.ReadAllText(fixturePath));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Console.Error.WriteLine($"Fixture could not be read or parsed ({ex.GetType().Name}).");
+            return 1;
+        }
 
-        if (fixture == null || fixture.Providers.Count == 0)
+        if (fixture == null || fixture.Providers == null || fixture.Providers.Count == 0 ||
+            fixture.LatestHistory == null || fixture.History7Days == null ||
+            fixture.Providers.Any(provider => provider == null || string.IsNullOrWhiteSpace(provider.ProviderId)) ||
+            fixture.Providers.Select(provider => provider.ProviderId).Distinct(StringComparer.Ordinal).Count() != fixture.Providers.Count ||
+            fixture.LatestHistory.Concat(fixture.History7Days).Any(history => history == null ||
+                string.IsNullOrWhiteSpace(history.ProviderId) || history.StatusMessage == null || history.UpstreamResponseNote == null))
         {
             Console.Error.WriteLine("Fixture is empty or invalid.");
             return 1;
         }
 
         Console.WriteLine($"Fixture contains {fixture.Providers.Count} providers");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
+        if (File.Exists(dbPath))
+        {
+            File.Delete(dbPath);
+        }
+
+        Console.WriteLine($"Creating database at: {dbPath}");
 
         var connectionString = new SqliteConnectionStringBuilder
         {
@@ -441,9 +467,11 @@ public class Program
                 new { Id = history.ProviderId });
 
             connection.Execute(
-                @"
-                INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage, is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms)
-                VALUES (@Id, @Used, @Avail, @Perc, @IsAvail, @Msg, @Next, @Fetched, @Details, @Latency)",
+                $@"
+                INSERT INTO provider_history ({HistoryColumns})
+                VALUES (@Id, @Used, @Avail, @Perc, @IsAvail, @Msg, @Next, @Fetched, @Details, @Latency,
+                    @HttpStatus, @UpstreamResponseValidity, @UpstreamResponseNote, @ParentProviderId, @CardId,
+                    @GroupId, @WindowKind, @ModelName, @Name, @CardType, @ResetCreditsAvailable, @ResetCreditExpirationsUtc)",
                 new
                 {
                     Id = history.ProviderId,
@@ -458,6 +486,18 @@ public class Program
                     Fetched = ToFetchedAtEpochSeconds(history.FetchedAt),
                     Details = history.DetailsJson,
                     Latency = history.ResponseLatencyMs,
+                    history.HttpStatus,
+                    history.UpstreamResponseValidity,
+                    history.UpstreamResponseNote,
+                    history.ParentProviderId,
+                    history.CardId,
+                    history.GroupId,
+                    history.WindowKind,
+                    history.ModelName,
+                    history.Name,
+                    history.CardType,
+                    history.ResetCreditsAvailable,
+                    history.ResetCreditExpirationsUtc,
                 });
         }
 
@@ -467,6 +507,11 @@ public class Program
 
     private static long ToFetchedAtEpochSeconds(string fetchedAt)
     {
+        if (long.TryParse(fetchedAt, NumberStyles.Integer, CultureInfo.InvariantCulture, out var epoch))
+        {
+            return epoch;
+        }
+
         if (DateTimeOffset.TryParse(
                 fetchedAt,
                 CultureInfo.InvariantCulture,
@@ -528,6 +573,42 @@ public class Program
 
         [JsonPropertyName("response_latency_ms")]
         public double ResponseLatencyMs { get; set; }
+
+        [JsonPropertyName("http_status")]
+        public int HttpStatus { get; set; }
+
+        [JsonPropertyName("upstream_response_validity")]
+        public int UpstreamResponseValidity { get; set; }
+
+        [JsonPropertyName("upstream_response_note")]
+        public string UpstreamResponseNote { get; set; } = string.Empty;
+
+        [JsonPropertyName("parent_provider_id")]
+        public string? ParentProviderId { get; set; }
+
+        [JsonPropertyName("card_id")]
+        public string? CardId { get; set; }
+
+        [JsonPropertyName("group_id")]
+        public string? GroupId { get; set; }
+
+        [JsonPropertyName("window_kind")]
+        public int WindowKind { get; set; }
+
+        [JsonPropertyName("model_name")]
+        public string? ModelName { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("card_type")]
+        public string? CardType { get; set; }
+
+        [JsonPropertyName("reset_credits_available")]
+        public int? ResetCreditsAvailable { get; set; }
+
+        [JsonPropertyName("reset_credit_expirations_utc")]
+        public string? ResetCreditExpirationsUtc { get; set; }
     }
 
     private sealed class TestDataFixture
