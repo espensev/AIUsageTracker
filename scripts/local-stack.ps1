@@ -224,6 +224,12 @@ function Test-StackProcessOwnership {
     return $false
 }
 
+function ConvertTo-StackPowerShellLiteral {
+    param([AllowEmptyString()] [string]$Value)
+
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
 function ConvertTo-StackRollbackCommand {
     param(
         [Parameter(Mandatory)] [string]$TaskPath,
@@ -234,11 +240,57 @@ function ConvertTo-StackRollbackCommand {
     )
 
     $execute = Join-Path $ReleaseDirectory $ExecutableName
-    $actionText = "New-ScheduledTaskAction -Execute '$execute' -WorkingDirectory '$ReleaseDirectory'"
+    $actionText = "New-ScheduledTaskAction -Execute $(ConvertTo-StackPowerShellLiteral $execute) -WorkingDirectory $(ConvertTo-StackPowerShellLiteral $ReleaseDirectory)"
     if (-not [string]::IsNullOrWhiteSpace($Arguments)) {
-        $actionText += " -Argument '$Arguments'"
+        $actionText += " -Argument $(ConvertTo-StackPowerShellLiteral $Arguments)"
     }
-    return "Set-ScheduledTask -TaskPath '$TaskPath' -TaskName '$TaskName' -Action ($actionText)"
+    return "Set-ScheduledTask -TaskPath $(ConvertTo-StackPowerShellLiteral $TaskPath) -TaskName $(ConvertTo-StackPowerShellLiteral $TaskName) -Action ($actionText)"
+}
+
+function Assert-StackDeployConfiguration {
+    if ($MonitorPort -ne 5000) {
+        throw 'MonitorPort must be 5000 for deploy; the Monitor does not support a port override'
+    }
+    $configuredRoot = $env:AIUSAGETRACKER_LOCAL_APP_DATA_ROOT
+    if (-not [string]::IsNullOrWhiteSpace($configuredRoot)) {
+        $actualRoot = [IO.Path]::GetFullPath($configuredRoot).TrimEnd('\', '/')
+        $defaultRoot = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData')).TrimEnd('\', '/')
+        if (-not $actualRoot.Equals($defaultRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'AIUSAGETRACKER_LOCAL_APP_DATA_ROOT overrides are not supported for deploy; the Monitor uses the default LocalApplicationData folder'
+        }
+    }
+}
+
+function ConvertTo-StackWebUri {
+    param([string]$Url)
+
+    $uri = $null
+    if (-not [uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -notin @('http', 'https') -or -not $uri.IsLoopback -or
+        $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or $uri.UserInfo) {
+        throw 'WebUrl must be one loopback HTTP(S) origin without credentials, path, query, or fragment'
+    }
+    return $uri
+}
+
+function Resolve-StackWebConfiguration {
+    param([string]$Arguments, [string]$Url)
+
+    $newUri = ConvertTo-StackWebUri -Url $Url
+    $urlArguments = [regex]::Matches($Arguments, '(?i)(?<!\S)--urls(?:=|\s+)(?:"(?<url>[^"]*)"|(?<url>\S+))')
+    if ($urlArguments.Count -gt 1) { throw 'Web task has multiple --urls arguments; reconcile its configuration before deploying' }
+    $newArguments = "--urls $Url"
+    $previousPort = $newUri.Port
+    if ($urlArguments.Count -eq 1) {
+        $argument = $urlArguments[0]
+        $previousPort = (ConvertTo-StackWebUri -Url $argument.Groups['url'].Value).Port
+        $newArguments = $Arguments.Substring(0, $argument.Index) + $newArguments + $Arguments.Substring($argument.Index + $argument.Length)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Arguments)) {
+        if ($Arguments -match '(?i)(?<!\S)--urls(?:=|\s|$)') { throw 'Web task has an incomplete --urls argument' }
+        $newArguments = $Arguments.TrimEnd() + ' ' + $newArguments
+    }
+    return [pscustomobject]@{ Arguments = $newArguments; PreviousPort = $previousPort }
 }
 
 function Assert-StackTaskNamespace {
@@ -429,7 +481,8 @@ function Get-StackGitState {
         throw "cannot read git HEAD in $RepoRoot"
     }
     $branch = (& git -C $RepoRoot branch --show-current 2>$null)
-    $changes = @(& git -C $RepoRoot status --porcelain --untracked-files=no 2>$null)
+    $changes = @(& git -C $RepoRoot status --porcelain --untracked-files=normal 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw "cannot read git status in $RepoRoot" }
     return [pscustomobject]@{
         Sha    = $sha.Trim()
         Branch = if ([string]::IsNullOrWhiteSpace($branch)) { '(detached)' } else { $branch.Trim() }
@@ -504,13 +557,25 @@ function Register-StackTasks {
 
     $monitorAction = New-StackTaskAction -ReleaseDirectory $ReleaseDirectory -ExecutableName $script:MonitorExecutable
     $monitorPrincipal = New-ScheduledTaskPrincipal -UserId $userId -LogonType S4U -RunLevel Limited
-    Register-ScheduledTask -TaskPath $Folder -TaskName 'Monitor' -Action $monitorAction -Trigger (New-ScheduledTaskTrigger -AtStartup) `
-        -Principal $monitorPrincipal -Settings $settings -Description "AIUsageTracker Monitor loopback API (:$MonitorPort). Managed by scripts/local-stack.ps1." | Out-Null
+    $createdMonitor = $false
+    try {
+        Register-ScheduledTask -TaskPath $Folder -TaskName 'Monitor' -Action $monitorAction -Trigger (New-ScheduledTaskTrigger -AtStartup) `
+            -Principal $monitorPrincipal -Settings $settings -Description "AIUsageTracker Monitor loopback API (:$MonitorPort). Managed by scripts/local-stack.ps1." | Out-Null
+        $createdMonitor = $true
 
-    $webAction = New-StackTaskAction -ReleaseDirectory $ReleaseDirectory -ExecutableName $script:WebExecutable -Arguments $WebArguments
-    $webPrincipal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskPath $Folder -TaskName 'Web' -Action $webAction -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $userId) `
-        -Principal $webPrincipal -Settings $webSettings -Description "AIUsageTracker Web dashboard ($WebUrl). Managed by scripts/local-stack.ps1." | Out-Null
+        $webAction = New-StackTaskAction -ReleaseDirectory $ReleaseDirectory -ExecutableName $script:WebExecutable -Arguments $WebArguments
+        $webPrincipal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskPath $Folder -TaskName 'Web' -Action $webAction -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $userId) `
+            -Principal $webPrincipal -Settings $webSettings -Description "AIUsageTracker Web dashboard ($WebUrl). Managed by scripts/local-stack.ps1." | Out-Null
+    }
+    catch {
+        $registrationError = $_
+        if ($createdMonitor) {
+            try { Unregister-ScheduledTask -TaskPath $Folder -TaskName 'Monitor' -Confirm:$false -ErrorAction Stop }
+            catch { Write-Warning "could not remove newly registered ${Folder}Monitor: $($_.Exception.Message)" }
+        }
+        throw $registrationError
+    }
 }
 
 function Stop-StackComponent {
@@ -669,9 +734,11 @@ function Invoke-StackDeploy {
     $startedAt = Get-Date
 
     Write-Step 'Preflight'
+    Assert-StackDeployConfiguration
+    [void](ConvertTo-StackWebUri -Url $WebUrl)
     Assert-StackTaskNamespace -Folder $TaskFolder
     $git = Get-StackGitState -RepoRoot $repoRoot
-    Write-Detail "source: $repoRoot @ $($git.Sha.Substring(0, 8)) ($($git.Branch))$(if ($git.Dirty) { ' with uncommitted tracked changes' })"
+    Write-Detail "source: $repoRoot @ $($git.Sha.Substring(0, 8)) ($($git.Branch))$(if ($git.Dirty) { ' with uncommitted changes' })"
     if ($null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         throw 'dotnet SDK not found on PATH'
     }
@@ -683,9 +750,12 @@ function Invoke-StackDeploy {
     }
     $previousMonitorRelease = Get-StackTaskReleaseDirectory -Task $tasks.Monitor
     $previousWebRelease = Get-StackTaskReleaseDirectory -Task $tasks.Web
+    $monitorAction = Get-StackTaskAction -Task $tasks.Monitor
+    $monitorArguments = Get-StackActionProperty -ActionObject $monitorAction -Name 'Arguments'
     $webAction = Get-StackTaskAction -Task $tasks.Web
-    $webArguments = if ($null -ne $webAction) { Get-StackActionProperty -ActionObject $webAction -Name 'Arguments' } else { "--urls $WebUrl" }
-    if ([string]::IsNullOrWhiteSpace($webArguments)) { $webArguments = "--urls $WebUrl" }
+    $previousWebArguments = Get-StackActionProperty -ActionObject $webAction -Name 'Arguments'
+    $webConfiguration = Resolve-StackWebConfiguration -Arguments $previousWebArguments -Url $WebUrl
+    $webArguments = $webConfiguration.Arguments
 
     if ($null -ne $tasks.Monitor) { Write-Detail "Monitor task: $($tasks.Monitor.TaskPath)$($tasks.Monitor.TaskName) currently -> $previousMonitorRelease" }
     else { Write-Detail "Monitor task: none found; will register $TaskFolder\Monitor" }
@@ -714,15 +784,17 @@ function Invoke-StackDeploy {
     Write-Detail ('Monitor {0}, Web {1}' -f (Get-StackExecutableVersion -Path (Join-Path $releaseDirectory $script:MonitorExecutable)), (Get-StackExecutableVersion -Path (Join-Path $releaseDirectory $script:WebExecutable)))
 
     Write-Step 'Stop (Web first so it cannot respawn the old Monitor)'
-    Stop-StackComponent -Task $tasks.Web -ExecutableName $script:WebExecutable -Port ([uri]$WebUrl).Port -OwnedDirectories @($previousWebRelease)
+    Stop-StackComponent -Task $tasks.Web -ExecutableName $script:WebExecutable -Port $webConfiguration.PreviousPort -OwnedDirectories @($previousWebRelease)
     Stop-StackComponent -Task $tasks.Monitor -ExecutableName $script:MonitorExecutable -Port $MonitorPort -OwnedDirectories @($previousMonitorRelease)
 
     $rollback = @()
     if (-not [string]::IsNullOrWhiteSpace($previousMonitorRelease)) {
-        $rollback += ConvertTo-StackRollbackCommand -TaskPath $tasks.Monitor.TaskPath -TaskName $tasks.Monitor.TaskName -ReleaseDirectory $previousMonitorRelease -ExecutableName $script:MonitorExecutable
-        $rollback += ConvertTo-StackRollbackCommand -TaskPath $tasks.Web.TaskPath -TaskName $tasks.Web.TaskName -ReleaseDirectory $previousWebRelease -ExecutableName $script:WebExecutable -Arguments $webArguments
-        $rollback += "Stop-ScheduledTask -TaskPath '$($tasks.Web.TaskPath)' -TaskName '$($tasks.Web.TaskName)'; Stop-ScheduledTask -TaskPath '$($tasks.Monitor.TaskPath)' -TaskName '$($tasks.Monitor.TaskName)'"
-        $rollback += "Start-ScheduledTask -TaskPath '$($tasks.Monitor.TaskPath)' -TaskName '$($tasks.Monitor.TaskName)'; Start-ScheduledTask -TaskPath '$($tasks.Web.TaskPath)' -TaskName '$($tasks.Web.TaskName)'"
+        $rollback += ConvertTo-StackRollbackCommand -TaskPath $tasks.Monitor.TaskPath -TaskName $tasks.Monitor.TaskName -ReleaseDirectory $previousMonitorRelease -ExecutableName $script:MonitorExecutable -Arguments $monitorArguments
+        $rollback += ConvertTo-StackRollbackCommand -TaskPath $tasks.Web.TaskPath -TaskName $tasks.Web.TaskName -ReleaseDirectory $previousWebRelease -ExecutableName $script:WebExecutable -Arguments $previousWebArguments
+        $monitorIdentity = "-TaskPath $(ConvertTo-StackPowerShellLiteral $tasks.Monitor.TaskPath) -TaskName $(ConvertTo-StackPowerShellLiteral $tasks.Monitor.TaskName)"
+        $webIdentity = "-TaskPath $(ConvertTo-StackPowerShellLiteral $tasks.Web.TaskPath) -TaskName $(ConvertTo-StackPowerShellLiteral $tasks.Web.TaskName)"
+        $rollback += "Stop-ScheduledTask $webIdentity; Stop-ScheduledTask $monitorIdentity"
+        $rollback += "Start-ScheduledTask $monitorIdentity; Start-ScheduledTask $webIdentity"
     }
 
     $repointed = [System.Collections.Generic.List[object]]::new()
@@ -735,10 +807,10 @@ function Invoke-StackDeploy {
             Write-Detail "registered $($tasks.Monitor.TaskPath)Monitor and $($tasks.Web.TaskPath)Web"
         }
         else {
-            Set-StackTaskRelease -Task $tasks.Monitor -ReleaseDirectory $releaseDirectory -ExecutableName $script:MonitorExecutable
-            $repointed.Add([pscustomobject]@{ Task = $tasks.Monitor; ReleaseDirectory = $previousMonitorRelease; ExecutableName = $script:MonitorExecutable; Arguments = '' })
+            Set-StackTaskRelease -Task $tasks.Monitor -ReleaseDirectory $releaseDirectory -ExecutableName $script:MonitorExecutable -Arguments $monitorArguments
+            $repointed.Add([pscustomobject]@{ Task = $tasks.Monitor; ReleaseDirectory = $previousMonitorRelease; ExecutableName = $script:MonitorExecutable; Arguments = $monitorArguments })
             Set-StackTaskRelease -Task $tasks.Web -ReleaseDirectory $releaseDirectory -ExecutableName $script:WebExecutable -Arguments $webArguments
-            $repointed.Add([pscustomobject]@{ Task = $tasks.Web; ReleaseDirectory = $previousWebRelease; ExecutableName = $script:WebExecutable; Arguments = $webArguments })
+            $repointed.Add([pscustomobject]@{ Task = $tasks.Web; ReleaseDirectory = $previousWebRelease; ExecutableName = $script:WebExecutable; Arguments = $previousWebArguments })
             Write-Detail 'actions replaced; principals, triggers and settings untouched'
         }
     }

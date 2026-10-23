@@ -7,14 +7,14 @@ build of `AIUsageTracker.Monitor` and `AIUsageTracker.Web` from a release direct
 ```powershell
 pwsh -File scripts/local-stack.ps1                 # deploy the current checkout
 pwsh -File scripts/local-stack.ps1 -Action status  # inspect without changing anything
-Invoke-Pester -Path scripts/local-stack.Tests.ps1  # helpers and mocked system boundaries
+Invoke-Pester -Path scripts/local-stack*.Tests.ps1  # helpers and mocked system boundaries
 ```
 
 ## Layout
 
 | Piece | Where | Notes |
 |---|---|---|
-| Releases | `%LOCALAPPDATA%\Programs\AIUsageTracker\Web\releases\<sha8>-<yyyyMMdd>` | Both projects published into one directory, framework-dependent (`dotnet publish -c Release`). A `-dirty` suffix means tracked files were modified at publish time. |
+| Releases | `%LOCALAPPDATA%\Programs\AIUsageTracker\Web\releases\<sha8>-<yyyyMMdd>` | Both projects published into one directory, framework-dependent (`dotnet publish -c Release`). A `-dirty` suffix means tracked modifications or untracked files were present at publish time; ignored build output is excluded. |
 | Monitor task | discovered by its action (`AIUsageTracker.Monitor.exe`) | Boot trigger, S4U (no stored password), restart on failure 10 x 1 min, no time limit. |
 | Web task | discovered by its action (`AIUsageTracker.Web.exe --urls http://localhost:5100`) | Logon trigger, hidden, same restart policy. |
 | Data | `%LOCALAPPDATA%\AIUsageTracker` | `usage.db`, `preferences.json`, `providers.json`, `monitor.json`, `logs\`. Never inside a release directory. |
@@ -27,6 +27,18 @@ under `\SevGrp\`; root, `\MyTasks\`, bare `\SevGrp\`, and unrelated namespaces a
 before publishing or changing scheduler state. Existing owner folders under `\Sevnet\`
 or `\AdminTasks\` are preserved; existing tasks in forbidden folders require remediation
 by their owner before this script can deploy.
+
+`-WebUrl` configures the launched Web task's `--urls` argument and its readiness
+checks. Existing non-URL arguments are preserved, and rollback restores the
+original arguments for both applications. The existing Web listener is stopped
+using its previous URL before the new URL is activated. URLs must name one
+loopback HTTP(S) origin; ambiguous or malformed existing `--urls` arguments fail
+preflight.
+
+Deployment supports Monitor port 5000 and the default Windows LocalApplicationData
+root. A different `-MonitorPort` or `AIUSAGETRACKER_LOCAL_APP_DATA_ROOT` is rejected
+before publishing or changing tasks because Monitor does not implement those
+overrides. Status inspection can still use its explicit probe settings.
 
 ## Deploy sequence
 
@@ -45,6 +57,8 @@ by their owner before this script can deploy.
    settings are untouched. The rollback lines are prepared before the first action is
    replaced; if a later update fails, the deploy prints them and restores the tasks it
    already re-pointed at their previous release.
+   On a first installation, a failed Web registration removes only the Monitor task
+   successfully created by that attempt; pre-existing tasks are never removed.
 5. Start Monitor and wait for port 5000 plus a fresh `monitor.json` (`StartedAt`, live pid).
 6. Start Web and wait for `GET /` to answer 200 and `/api/monitor/status` to report
    `isRunning` and `isContractCompatible`. A `degraded` service health (a provider failing)
