@@ -20,6 +20,8 @@ public sealed class SeederTests
     [InlineData("{\"providers\":null}")]
     [InlineData("{\"providers\":[null]}")]
     [InlineData("{\"providers\":[{\"provider_id\":\"duplicate\"},{\"provider_id\":\"duplicate\"}]}")]
+    [InlineData("{\"providers\":[{\"provider_id\":\"child\"}],\"latest_history\":[{\"provider_id\":\"child\",\"parent_provider_id\":\"missing\"}]}")]
+    [InlineData("{\"providers\":[{\"provider_id\":\"Parent\"},{\"provider_id\":\"child\"}],\"latest_history\":[{\"provider_id\":\"child\",\"parent_provider_id\":\"parent\"}]}")]
     public void SeedDatabase_InvalidInput_PreservesExistingDatabaseBytes(string? fixtureContents)
     {
         var directory = TestTempPaths.CreateDirectory("seeder-input-safety");
@@ -48,6 +50,44 @@ public sealed class SeederTests
             var newParent = Path.Combine(directory, "untouched-parent");
             Assert.Equal(1, Seeder.Program.SeedDatabase(fixture, Path.Combine(newParent, "usage.db")));
             Assert.False(Directory.Exists(newParent));
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(directory);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SeedDatabase_ParentAppearsLaterInHistory_ResolvesExactCaseIdentityBeforeInsert(bool useSevenDayHistory)
+    {
+        var directory = TestTempPaths.CreateDirectory("seeder-parent-order");
+        try
+        {
+            var fixture = Path.Combine(directory, "parent-fixture.json");
+            var database = Path.Combine(directory, "usage.db");
+            var history = new[]
+            {
+                new { provider_id = "child", parent_provider_id = "Parent" },
+                new { provider_id = "Parent", parent_provider_id = (string?)null },
+            };
+            File.WriteAllText(fixture, JsonSerializer.Serialize(new
+            {
+                providers = new[] { new { provider_id = "parent", provider_name = "Metadata owner", is_active = 1 } },
+                latest_history = useSevenDayHistory ? [] : history,
+                history_7days = useSevenDayHistory ? history : [],
+            }));
+
+            Assert.Equal(0, Seeder.Program.SeedDatabase(fixture, database));
+
+            using var connection = Open(database);
+            Assert.Equal(0, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM pragma_foreign_key_check"));
+            Assert.Equal(2, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history"));
+            Assert.Equal(2, connection.ExecuteScalar<int>("SELECT COUNT(*) FROM providers WHERE provider_id IN ('Parent', 'parent')"));
+            Assert.Equal("Parent", connection.ExecuteScalar<string>("SELECT parent_provider_id FROM provider_history WHERE provider_id = 'child'"));
+            Assert.Equal(1, connection.ExecuteScalar<int>("SELECT is_active FROM providers WHERE provider_id = 'parent'"));
+            Assert.Equal(0, connection.ExecuteScalar<int>("SELECT is_active FROM providers WHERE provider_id = 'Parent'"));
         }
         finally
         {

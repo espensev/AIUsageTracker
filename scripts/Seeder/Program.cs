@@ -352,6 +352,16 @@ public class Program
             return 1;
         }
 
+        var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
+        var providerIds = fixture.Providers.Select(provider => provider.ProviderId)
+            .Concat(historyToInsert.Select(history => history.ProviderId))
+            .ToHashSet(StringComparer.Ordinal);
+        if (historyToInsert.Any(history => history.ParentProviderId != null && !providerIds.Contains(history.ParentProviderId)))
+        {
+            Console.Error.WriteLine("Fixture references a parent provider absent from provider metadata and selected history.");
+            return 1;
+        }
+
         Console.WriteLine($"Fixture contains {fixture.Providers.Count} providers");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
         if (File.Exists(dbPath))
@@ -454,18 +464,21 @@ public class Program
                 });
         }
 
-        var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
-        foreach (var history in historyToInsert)
+        foreach (var providerId in historyToInsert.Select(history => history.ProviderId).Distinct(StringComparer.Ordinal))
         {
             // Exported history can outlive its provider metadata. Preserve those rows
-            // without presenting a history-only provider as actively configured.
+            // without presenting a history-only provider as actively configured. Resolve
+            // every owner before inserting history so parent references do not depend on order.
             connection.Execute(
                 @"
                 INSERT INTO providers (provider_id, provider_name, is_active)
                 VALUES (@Id, @Id, 0)
                 ON CONFLICT(provider_id) DO NOTHING",
-                new { Id = history.ProviderId });
+                new { Id = providerId });
+        }
 
+        foreach (var history in historyToInsert)
+        {
             connection.Execute(
                 $@"
                 INSERT INTO provider_history ({HistoryColumns})
