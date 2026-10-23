@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Providers;
 using AIUsageTracker.Infrastructure.MonitorClient;
 using AIUsageTracker.Infrastructure.Services;
 using AIUsageTracker.UI.Slim.Services;
@@ -863,10 +864,7 @@ public partial class SettingsWindow : Window
 
         this._monitorService.InvalidateGroupedUsageCache();
 
-        if (removedProviderIds.Count > 0)
-        {
-            await this._preferencesStore.SaveAsync(this._preferences).ConfigureAwait(true);
-        }
+        await this._preferencesStore.SaveAsync(this._preferences).ConfigureAwait(true);
 
         if (removedProviderIds.Count > 0)
         {
@@ -909,12 +907,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        if (this._preferences.SuppressedProviderIds.Contains(config.ProviderId, StringComparer.OrdinalIgnoreCase))
-        {
-            this._preferences.SuppressedProviderIds.Remove(config.ProviderId);
-        }
-
-        var saved = await this._monitorService.SaveConfigAsync(config).ConfigureAwait(true);
+        var saved = await SaveAndUnsuppressProviderAsync(this._monitorService, this._preferences, config).ConfigureAwait(true);
         if (!saved)
         {
             failedConfigs.Add(config.ProviderId);
@@ -926,6 +919,25 @@ public partial class SettingsWindow : Window
         return behavior.InputMode == ProviderInputMode.StandardApiKey &&
                string.IsNullOrWhiteSpace(config.ApiKey) &&
                !config.HasStoredApiKey;
+    }
+
+    internal static async Task<bool> SaveAndUnsuppressProviderAsync(IMonitorService monitorService, AppPreferences preferences, ProviderConfig config)
+    {
+        var saved = await monitorService.SaveConfigAsync(config).ConfigureAwait(true);
+        if (saved)
+        {
+            UnsuppressProvider(preferences, config.ProviderId);
+        }
+
+        return saved;
+    }
+
+    internal static void UnsuppressProvider(AppPreferences preferences, string providerId)
+    {
+        var ownerId = ProviderMetadataCatalog.GetProviderOwnerId(providerId);
+        preferences.SuppressedProviderIds = preferences.SuppressedProviderIds
+            .Where(id => !ProviderMetadataCatalog.GetSuppressedProviderIds(new[] { id }).Contains(ownerId))
+            .ToList();
     }
 
     private async void CancelBtn_Click(object sender, RoutedEventArgs e)

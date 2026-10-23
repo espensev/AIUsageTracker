@@ -1,10 +1,10 @@
 # <img src="AIUsageTracker.Web/wwwroot/favicon.png" width="32" height="32" valign="middle"> AI Usage Tracker
 
-![Version](https://img.shields.io/badge/version-2.4.6-green)
+![Version](https://img.shields.io/badge/version-2.4.7-green)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Language](https://img.shields.io/badge/language-C%23%20|%20.NET-purple)
 [![](https://dcbadge.limes.pink/api/server/AZtNQtWuJA?style=flat)](https://discord.gg/AZtNQtWuJA)
-![Downloads](https://img.shields.io/github/downloads/rygel/AIUsageTracker/total)
+![Downloads](https://img.shields.io/github/downloads/espensev/AIUsageTracker/total)
 
 <img src="docs/screenshot_dashboard_privacy.png" alt="Dashboard" width="50%" />
 
@@ -24,7 +24,7 @@ Version `2.4.7` is `<TrackerVersion>` in `Directory.Build.props`.
 
 ## Install
 
-Download `AIUsageTracker_Setup_v2.4.7_{arch}.exe` from [Releases](https://github.com/rygel/AIUsageTracker/releases) (`scripts/setup.iss` `OutputBaseFilename`, default arch `x64`). Default install dir: `{autopf}\AIUsageTracker`.
+Download `AIUsageTracker_Setup_v2.4.7_{arch}.exe` from [Releases](https://github.com/espensev/AIUsageTracker/releases) (`scripts/setup.iss` `OutputBaseFilename`, default arch `x64`). Default install dir: `{autopf}\AIUsageTracker`.
 
 ## Providers
 

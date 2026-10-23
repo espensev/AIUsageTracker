@@ -8,6 +8,6 @@ namespace AIUsageTracker.Tests.UI;
 // App.SetPrivacyMode, Application.Current) and must not run in parallel
 // with each other to avoid interference.
 [CollectionDefinition("WpfState", DisableParallelization = true)]
-public sealed class WpfStateTestCollection
+public sealed class WpfStateTestCollection : ICollectionFixture<WpfApplicationFixture>
 {
 }

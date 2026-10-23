@@ -350,7 +350,7 @@ public sealed class MonitorStartupPathTests : IDisposable
     public async Task WaitForAgentAsync_ReturnsFalse_WhenCancelledAsync()
     {
         var launcher = new MonitorLauncher(
-            monitorInfoCandidatePathsOverride: () => Array.Empty<string>(),
+            monitorInfoCandidatePathsOverride: () => new[] { Path.Combine(this._tempDirectory, "monitor.json") },
             healthCheckOverride: _ => Task.FromResult(false),
             processRunningOverride: _ => Task.FromResult(false));
 
@@ -567,7 +567,7 @@ public sealed class MonitorStartupPathTests : IDisposable
         TestTempPaths.CleanupPath(this._tempDirectory);
     }
 
-    private MonitorService CreateMonitorService(MonitorLauncher? launcher = null)
+    private MonitorService CreateMonitorService(MonitorLauncher launcher)
     {
         return new MonitorService(
             new HttpClient(new Mock<HttpMessageHandler>().Object),

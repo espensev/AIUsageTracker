@@ -59,6 +59,17 @@ public sealed class UpdateChannelPersistenceRegressionTests : IDisposable
         this._store = new UiPreferencesStore(NullLogger<UiPreferencesStore>.Instance, this._mockPathProvider.Object);
     }
 
+    [Fact]
+    public void Deserialize_NullSuppressionList_PreservesOtherPreferences()
+    {
+        var preferences = AppPreferences.Deserialize("{\"SuppressedProviderIds\":null,\"FontSize\":23,\"StayOpen\":true}");
+
+        Assert.NotNull(preferences.SuppressedProviderIds);
+        Assert.Empty(preferences.SuppressedProviderIds);
+        Assert.Equal(23, preferences.FontSize);
+        Assert.True(preferences.StayOpen);
+    }
+
     public void Dispose()
     {
         TestTempPaths.CleanupPath(this._testDirectory);
