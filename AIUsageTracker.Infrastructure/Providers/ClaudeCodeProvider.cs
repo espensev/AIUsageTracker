@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Core.Providers;
+using AIUsageTracker.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AIUsageTracker.Infrastructure.Providers;
@@ -28,11 +29,13 @@ public class ClaudeCodeProvider : ProviderBase
 
     private readonly ILogger<ClaudeCodeProvider> _logger;
     private readonly HttpClient _httpClient;
+    private readonly string? _credentialsFilePath;
 
-    public ClaudeCodeProvider(ILogger<ClaudeCodeProvider> logger, HttpClient httpClient)
+    public ClaudeCodeProvider(ILogger<ClaudeCodeProvider> logger, HttpClient httpClient, string? credentialsFilePath = null)
     {
         this._logger = logger;
         this._httpClient = httpClient;
+        this._credentialsFilePath = credentialsFilePath;
     }
 
     public static ProviderDefinition StaticDefinition { get; } = new(
@@ -47,6 +50,7 @@ public class ClaudeCodeProvider : ProviderBase
         BadgeInitial = "C",
         AuthIdentityCandidatePathTemplates = new[]
         {
+            "%CLAUDE_CONFIG_DIR%\\.credentials.json",
             "%USERPROFILE%\\.claude\\.credentials.json",
         },
         SessionAuthFileSchemas = new[]
@@ -77,8 +81,12 @@ public class ClaudeCodeProvider : ProviderBase
 
         var providerLabel = ProviderMetadataCatalog.GetConfiguredDisplayName(config.ProviderId);
 
-        // Check if API key is configured
-        if (string.IsNullOrEmpty(config.ApiKey))
+        // Claude Code quotas belong to the current CLI session. A legacy key in
+        // shared provider configuration must not hide a valid native OAuth token.
+        var nativeToken = this.ReadFreshOAuthToken();
+        var effectiveApiKey = nativeToken ?? config.ApiKey;
+        var effectiveAuthSource = nativeToken != null ? "Claude Code CLI session auth" : config.AuthSource;
+        if (string.IsNullOrEmpty(effectiveApiKey))
         {
             return new[]
             {
@@ -95,20 +103,7 @@ public class ClaudeCodeProvider : ProviderBase
             };
         }
 
-        // Re-read the credentials file to get the freshest OAuth token.
-        // The Claude Code CLI refreshes the token periodically and writes it back
-        // to .credentials.json. Using the stale config.ApiKey would fail once the
-        // token expires (typically within 1 hour).
-        var effectiveApiKey = config.ApiKey;
         var isOAuthToken = effectiveApiKey.StartsWith("sk-ant-oat", StringComparison.Ordinal);
-        if (isOAuthToken)
-        {
-            var freshToken = this.ReadFreshOAuthToken();
-            if (!string.IsNullOrEmpty(freshToken))
-            {
-                effectiveApiKey = freshToken;
-            }
-        }
 
         // Try OAuth usage endpoint first (for subscription users)
         var failureStatus = 0;
@@ -117,6 +112,14 @@ public class ClaudeCodeProvider : ProviderBase
             var (oauthUsages, oauthFailureStatus) = await this.TryGetUsageFromOAuthAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
             if (oauthUsages != null)
             {
+                if (nativeToken != null)
+                {
+                    foreach (var usage in oauthUsages)
+                    {
+                        usage.AuthSource = "Claude Code CLI session auth";
+                    }
+                }
+
                 return oauthUsages;
             }
 
@@ -125,6 +128,18 @@ public class ClaudeCodeProvider : ProviderBase
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             this._logger.LogDebug(ex, "OAuth usage endpoint not available, trying rate limit headers");
+        }
+
+        // A rejected native session must not hide a separately configured API key.
+        // Keep transient failures and a duplicate/stale OAuth token on the native path.
+        if (nativeToken != null && failureStatus is 401 or 403 &&
+            !string.IsNullOrWhiteSpace(config.ApiKey) &&
+            !config.ApiKey.StartsWith("sk-ant-oat", StringComparison.Ordinal) &&
+            !string.Equals(nativeToken, config.ApiKey, StringComparison.Ordinal))
+        {
+            effectiveApiKey = config.ApiKey;
+            effectiveAuthSource = config.AuthSource;
+            isOAuthToken = false;
         }
 
         // Skip the API rate-limit probe when the token is an OAuth token — it will
@@ -136,6 +151,7 @@ public class ClaudeCodeProvider : ProviderBase
                 var (apiUsage, apiFailureStatus) = await this.GetUsageFromApiAsync(effectiveApiKey, providerLabel).ConfigureAwait(false);
                 if (apiUsage != null)
                 {
+                    apiUsage.AuthSource = effectiveAuthSource;
                     return new[] { apiUsage };
                 }
 
@@ -152,7 +168,9 @@ public class ClaudeCodeProvider : ProviderBase
 
         // Neither source answered. Report that rather than shelling out to the claude CLI:
         // it has no usage subcommand, so "claude usage" starts a full agent session.
-        return new[] { this.CreateUsageUnavailable(failureStatus, providerLabel) };
+        var unavailable = this.CreateUsageUnavailable(failureStatus, providerLabel);
+        unavailable.AuthSource = effectiveAuthSource;
+        return new[] { unavailable };
     }
 
     /// <summary>
@@ -238,49 +256,73 @@ public class ClaudeCodeProvider : ProviderBase
     }
 
     /// <summary>
-    /// Re-reads the OAuth access token from ~/.claude/.credentials.json.
+    /// Re-reads the OAuth access token from the Claude Code CLI credentials file
+    /// (<c>%CLAUDE_CONFIG_DIR%</c> when set, otherwise ~/.claude/.credentials.json).
     /// The Claude Code CLI refreshes this file when the token expires.
     /// </summary>
     private string? ReadFreshOAuthToken()
     {
-        try
-        {
-            var credentialsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".claude",
-                ".credentials.json");
+        return this.ReadFreshOAuthToken(this.GetCredentialsFileCandidates());
+    }
 
+    internal string? ReadFreshOAuthToken(IEnumerable<string> candidates)
+    {
+        foreach (var credentialsPath in candidates)
+        {
             if (!File.Exists(credentialsPath))
             {
-                return null;
+                continue;
             }
 
-            var json = File.ReadAllText(credentialsPath);
-            using var doc = JsonDocument.Parse(json);
-
-            if (!doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth))
+            try
             {
-                return null;
-            }
+                var json = File.ReadAllText(credentialsPath);
+                using var doc = JsonDocument.Parse(json);
 
-            if (!oauth.TryGetProperty("accessToken", out var tokenElement))
+                if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                    !doc.RootElement.TryGetProperty("claudeAiOauth", out var oauth) ||
+                    oauth.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (!oauth.TryGetProperty("accessToken", out var tokenElement) ||
+                    tokenElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var token = tokenElement.GetString();
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                this._logger.LogDebug("Re-read fresh OAuth token from credentials file ({Length} chars)", token.Length);
+                return token;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
-                return null;
+                this._logger.LogDebug(ex, "Failed to re-read OAuth token from credentials candidate");
             }
-
-            var token = tokenElement.GetString();
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return null;
-            }
-
-            this._logger.LogDebug("Re-read fresh OAuth token from credentials file ({Length} chars)", token.Length);
-            return token;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+
+        return null;
+    }
+
+    private IEnumerable<string> GetCredentialsFileCandidates()
+    {
+        if (!string.IsNullOrWhiteSpace(this._credentialsFilePath))
         {
-            this._logger.LogDebug(ex, "Failed to re-read OAuth token from credentials file");
-            return null;
+            yield return this._credentialsFilePath;
+            yield break;
+        }
+
+        var discoverySpec = StaticDefinition.CreateAuthDiscoverySpec();
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var path in ProviderAuthCandidatePathResolver.ResolvePaths(discoverySpec, userProfile))
+        {
+            yield return path;
         }
     }
 
@@ -459,8 +501,15 @@ public class ClaudeCodeProvider : ProviderBase
                 return (usage, 0);
             }
 
-            // No rate limit headers found
-            return (null, testResponse.IsSuccessStatusCode ? 0 : (int)testResponse.StatusCode);
+            if (testResponse.IsSuccessStatusCode)
+            {
+                var unavailable = this.CreateUsageUnavailable(0, providerLabel);
+                unavailable.HttpStatus = (int)testResponse.StatusCode;
+                return (unavailable, 0);
+            }
+
+            // No rate limit headers found in a failed API response.
+            return (null, (int)testResponse.StatusCode);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {

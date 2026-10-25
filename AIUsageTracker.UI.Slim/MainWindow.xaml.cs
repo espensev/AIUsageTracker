@@ -355,7 +355,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task InitializeAsync()
+    internal async Task InitializeAsync()
     {
         if (this._isLoading)
         {

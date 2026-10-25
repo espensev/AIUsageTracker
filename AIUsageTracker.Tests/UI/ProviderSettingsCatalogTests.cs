@@ -2,14 +2,48 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
+using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.UI.Slim;
+using Moq;
 
 namespace AIUsageTracker.Tests.UI;
 
 public sealed class ProviderSettingsCatalogTests
 {
     private static readonly string TestApiKey = Guid.NewGuid().ToString();
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveAndUnsuppressProviderAsync_ChangesVisibilityOnlyAfterSuccessfulSaveAsync(bool saved)
+    {
+        var monitor = new Mock<IMonitorService>();
+        var config = new ProviderConfig { ProviderId = "groq", ApiKey = TestApiKey };
+        monitor.Setup(service => service.SaveConfigAsync(config)).ReturnsAsync(saved);
+        var preferences = new AppPreferences { SuppressedProviderIds = ["groq"] };
+
+        Assert.Equal(saved, await SettingsWindow.SaveAndUnsuppressProviderAsync(monitor.Object, preferences, config));
+
+        Assert.Equal(!saved, preferences.SuppressedProviderIds.Contains("groq"));
+    }
+
+    [Theory]
+    [InlineData("opencode-zen", "OPENCODE-ZEN")]
+    [InlineData("kimi-for-coding", "KIMI")]
+    [InlineData("kimi", "kimi-for-coding")]
+    [InlineData("codex.spark", "codex")]
+    public void UnsuppressProvider_ReaddedKeyClearsEquivalentIds(string providerId, string suppressedId)
+    {
+        var preferences = new AppPreferences
+        {
+            SuppressedProviderIds = new List<string> { suppressedId, providerId, "groq" },
+        };
+
+        SettingsWindow.UnsuppressProvider(preferences, providerId);
+
+        Assert.Equal(new[] { "groq" }, preferences.SuppressedProviderIds);
+    }
 
     [Fact]
     public void GetInputMode_ReturnsSessionAuth_ForCodexSpark()

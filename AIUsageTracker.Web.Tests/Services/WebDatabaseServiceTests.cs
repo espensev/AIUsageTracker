@@ -5,8 +5,13 @@
 using System.Globalization;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Services;
+using AIUsageTracker.Infrastructure.Configuration;
 using AIUsageTracker.Tests.Infrastructure;
+using AIUsageTracker.Web.Pages;
 using AIUsageTracker.Web.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -106,6 +111,78 @@ public class WebDatabaseServiceTests
     }
 
     [TestMethod]
+    public async Task GetUsageSummaryAsync_ExcludesSuppressedProvidersAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var summary = await service.GetUsageSummaryAsync(new[] { "claude" });
+
+        Assert.AreEqual(1, summary.ProviderCount);
+        Assert.AreEqual(10, summary.AverageUsage, 0.001);
+    }
+
+    [TestMethod]
+    public async Task GetUsageSummaryAsync_DoesNotServeUnfilteredCacheToFilteredCallAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var unfiltered = await service.GetUsageSummaryAsync();
+        var filtered = await service.GetUsageSummaryAsync(new[] { "openai" });
+
+        Assert.AreEqual(2, unfiltered.ProviderCount);
+        Assert.AreEqual(1, filtered.ProviderCount);
+    }
+
+    [TestMethod]
+    [DataRow("grok")]
+    [DataRow("GROK-CLI")]
+    public async Task GetUsageSummaryAsync_SuppressedAliasExcludesCanonicalHistoryAsync(string suppressedId)
+    {
+        var databasePath = this.CreateSeededDatabase();
+        this.SeedGrokCardRows(databasePath);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+
+        var summary = await service.GetUsageSummaryAsync(new[] { suppressedId });
+
+        Assert.AreEqual(2, summary.ProviderCount);
+        Assert.AreEqual(65, summary.AverageUsage, 0.001);
+        Assert.AreEqual(3, (await service.GetUsageSummaryAsync()).ProviderCount);
+    }
+
+    [TestMethod]
+    public async Task OnGetAsync_SuppressedAliasHidesCardsAndSummaryWithoutDeletingHistoryAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        this.SeedGrokCardRows(databasePath);
+        var paths = new TestAppPathProvider(databasePath);
+        var preferences = new PreferencesStore(NullLogger<PreferencesStore>.Instance, paths);
+        Assert.IsTrue(await preferences.SaveAsync(new AppPreferences
+        {
+            SuppressedProviderIds = new[] { "openai", "claude", "GROK-CLI" },
+        }));
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+        var analytics = new UsageAnalyticsService(service, cache, NullLogger<UsageAnalyticsService>.Instance);
+        var model = new IndexModel(service, analytics, preferences)
+        {
+            PageContext = new PageContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        await model.OnGetAsync(showUsed: null);
+
+        Assert.IsNotNull(model.LatestUsage);
+        Assert.AreEqual(0, model.LatestUsage.Count);
+        Assert.IsNotNull(model.Summary);
+        Assert.AreEqual(0, model.Summary.ProviderCount);
+        Assert.AreEqual(4, (await service.GetLatestUsageAsync(includeInactive: true)).Count);
+    }
+
+    [TestMethod]
     public async Task GetProvidersAsync_WhenDatabaseMissing_ReturnsEmptyListAsync()
     {
         var databasePath = Path.Combine(this._tempDirectory, "missing.db");
@@ -115,6 +192,40 @@ public class WebDatabaseServiceTests
         var providers = await service.GetProvidersAsync();
 
         Assert.AreEqual(0, providers.Count);
+    }
+
+    [TestMethod]
+    public async Task OnGetAsync_SuppressedOwner_HidesCoReportedCardsAndSummaryAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+INSERT INTO providers (provider_id, provider_name, is_active) VALUES ('codex.spark', 'Spark', 1);
+INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage,
+    is_available, status_message, response_latency_ms, fetched_at)
+VALUES ('codex.spark', 10, 100, 10, 1, 'ok', 100, '2026-03-10 10:00:00');";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var preferences = new PreferencesStore(NullLogger<PreferencesStore>.Instance, new TestAppPathProvider(databasePath));
+        Assert.IsTrue(await preferences.SaveAsync(new AppPreferences { SuppressedProviderIds = ["openai", "claude", "codex"] }));
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+        var model = new IndexModel(service, new UsageAnalyticsService(service, cache, NullLogger<UsageAnalyticsService>.Instance), preferences)
+        {
+            PageContext = new PageContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        await model.OnGetAsync(showUsed: null);
+
+        Assert.IsNotNull(model.LatestUsage);
+        Assert.IsNotNull(model.Summary);
+        Assert.AreEqual(0, model.LatestUsage.Count);
+        Assert.AreEqual(0, model.Summary.ProviderCount);
+        Assert.AreEqual(3, (await service.GetLatestUsageAsync(includeInactive: true)).Count);
     }
 
     private WebDatabaseService CreateService(string databasePath, IMemoryCache cache)

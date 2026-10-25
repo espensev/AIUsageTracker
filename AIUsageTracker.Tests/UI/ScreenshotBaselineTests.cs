@@ -2,14 +2,13 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
-using Codeuctivity.ImageSharpCompare;
-using SixLabors.ImageSharp;
+using System.Windows.Media.Imaging;
 
 namespace AIUsageTracker.Tests.UI;
 
 /// <summary>
-/// Perceptual screenshot baseline tests. Compares freshly-rendered screenshots against
-/// committed baselines using ImageSharpCompare with a pixel-error-percentage tolerance,
+/// Screenshot baseline tests. Compares freshly-rendered screenshots against
+/// committed baselines using exact RGB differences with a pixel-error-percentage tolerance,
 /// avoiding false positives from WPF ClearType subpixel rendering variance.
 ///
 /// Requires two environment variables set by the CI workflow before running:
@@ -28,7 +27,7 @@ public sealed class ScreenshotBaselineTests
     /// (typically &lt;0.1 %) while still catching meaningful layout regressions,
     /// which typically affect 5 %+ of pixels.
     /// </summary>
-    private const double PixelErrorTolerancePercent = 1.0;
+    internal const double PixelErrorTolerancePercent = 1.0;
 
     private static readonly string[] ScreenshotFileNames =
     [
@@ -66,11 +65,11 @@ public sealed class ScreenshotBaselineTests
             File.Exists(candidatePath),
             $"Candidate image not found: {candidatePath} — was screenshot generation run first?");
 
-        var diff = ImageSharpCompare.CalcDiff(candidatePath, baselinePath, ResizeOption.DontResize);
+        var diff = ScreenshotComparison.Compare(candidatePath, baselinePath);
 
         if (diff.PixelErrorPercentage >= PixelErrorTolerancePercent)
         {
-            SaveDiffImage(candidatePath, baselinePath, candidateDir, fileName);
+            SaveDiffImage(diff.DiffMask, candidateDir, fileName);
         }
 
         Assert.True(
@@ -81,12 +80,14 @@ public sealed class ScreenshotBaselineTests
             $"To accept new baselines, run: git add docs/screenshot_*_privacy.png && git commit -m 'chore: update screenshot baselines'");
     }
 
-    private static void SaveDiffImage(string candidatePath, string baselinePath, string outputDir, string fileName)
+    private static void SaveDiffImage(BitmapSource difference, string outputDir, string fileName)
     {
         try
         {
-            using var diffImage = ImageSharpCompare.CalcDiffMaskImage(candidatePath, baselinePath, ResizeOption.DontResize);
-            diffImage.SaveAsPng(Path.Combine(outputDir, $"diff_{fileName}"));
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(difference));
+            using var output = File.Create(Path.Combine(outputDir, $"diff_{fileName}"));
+            encoder.Save(output);
         }
         catch (Exception ex)
         {

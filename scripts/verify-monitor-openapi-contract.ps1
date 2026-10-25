@@ -154,11 +154,20 @@ try {
     }
     $diagnosticsUri = "http://localhost:$port/api/diagnostics"
 
+    # Every /api route except health requires the bearer token the Monitor
+    # persists in monitor.json at startup.
+    $agentInfoPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) "AIUsageTracker\monitor.json"
+    $accessToken = (Get-Content -LiteralPath $agentInfoPath -Raw | ConvertFrom-Json).AccessToken
+    if ([string]::IsNullOrWhiteSpace($accessToken)) {
+        throw "Monitor access token missing from $agentInfoPath"
+    }
+    $authHeaders = @{ Authorization = "Bearer $accessToken" }
+
     $diagnostics = $null
     $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
-            $diagnostics = Invoke-RestMethod -Uri $diagnosticsUri -TimeoutSec 2
+            $diagnostics = Invoke-RestMethod -Uri $diagnosticsUri -Headers $authHeaders -TimeoutSec 2
             break
         }
         catch {

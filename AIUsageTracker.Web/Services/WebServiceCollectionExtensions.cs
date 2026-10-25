@@ -14,9 +14,9 @@ namespace AIUsageTracker.Web.Services;
 
 internal static class WebServiceCollectionExtensions
 {
-    public static IServiceCollection AddAIUsageTrackerWebServices(this IServiceCollection services, string databasePath)
+    public static IServiceCollection AddAIUsageTrackerWebServices(this IServiceCollection services, string databasePath, string localAppDataRoot)
     {
-        services.AddSingleton<IAppPathProvider, DefaultAppPathProvider>();
+        services.AddSingleton<IAppPathProvider>(new DefaultAppPathProvider(localAppDataRoot));
         services.AddSingleton(_ => new WebDatabaseConnectionFactory(databasePath));
         services.AddSingleton(sp =>
         {

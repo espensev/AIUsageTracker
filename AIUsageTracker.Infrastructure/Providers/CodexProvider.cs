@@ -36,6 +36,7 @@ public class CodexProvider : ProviderBase
         BadgeInitial = "AI",
         AuthIdentityCandidatePathTemplates = new[]
         {
+            "%CODEX_HOME%\\auth.json",
             "%USERPROFILE%\\.codex\\auth.json",
             "%APPDATA%\\codex\\auth.json",
         },
@@ -71,6 +72,7 @@ public class CodexProvider : ProviderBase
         SessionStatusLabel = "OpenAI (Codex)",
         AuthIdentityCandidatePathTemplates = new[]
         {
+            "%CODEX_HOME%\\auth.json",
             "%USERPROFILE%\\.codex\\auth.json",
             "%APPDATA%\\codex\\auth.json",
         },

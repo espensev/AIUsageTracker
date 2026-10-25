@@ -27,7 +27,7 @@ public sealed class MonitorProcessServiceTests : IDisposable
     public async Task GetAgentStatusDetailedAsync_ReturnsMissing_WhenMonitorInfoIsAbsentAsync()
     {
         var launcher = new MonitorLauncher(
-            monitorInfoCandidatePathsOverride: () => Array.Empty<string>(),
+            monitorInfoCandidatePathsOverride: () => new[] { Path.Combine(this._tempDirectory, "monitor.json") },
             healthCheckOverride: _ => Task.FromResult(false),
             processRunningOverride: _ => Task.FromResult(false));
 
@@ -278,7 +278,7 @@ public sealed class MonitorProcessServiceTests : IDisposable
     public async Task StopAgentDetailedAsync_ReturnsAlreadyStopped_WhenMonitorInfoIsAbsentAsync()
     {
         var launcher = new MonitorLauncher(
-            monitorInfoCandidatePathsOverride: () => Array.Empty<string>(),
+            monitorInfoCandidatePathsOverride: () => new[] { Path.Combine(this._tempDirectory, "monitor.json") },
             healthCheckOverride: _ => Task.FromResult(false),
             processRunningOverride: _ => Task.FromResult(false));
 
@@ -297,7 +297,10 @@ public sealed class MonitorProcessServiceTests : IDisposable
 
     private MonitorProcessService CreateService(MonitorHealthSnapshot? healthSnapshot = null, MonitorLauncher? launcher = null)
     {
-        launcher ??= new MonitorLauncher();
+        launcher ??= new MonitorLauncher(
+            monitorInfoCandidatePathsOverride: () => new[] { Path.Combine(this._tempDirectory, "monitor.json") },
+            healthCheckOverride: _ => Task.FromResult(false),
+            processRunningOverride: _ => Task.FromResult(false));
         var monitorService = new Mock<IMonitorService>();
         monitorService.Setup(service => service.RefreshAgentInfoAsync()).Returns(Task.CompletedTask);
         monitorService.Setup(service => service.GetHealthSnapshotAsync()).ReturnsAsync(healthSnapshot);

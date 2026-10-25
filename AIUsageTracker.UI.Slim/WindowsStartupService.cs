@@ -31,7 +31,19 @@ internal static class WindowsStartupService
 
         if (startUi && File.Exists(exePath))
         {
-            key.SetValue(UiValueName, $"\"{exePath}\"");
+            var toolsRoot = Environment.GetEnvironmentVariable("MACHINE_TOOLS_ROOT", EnvironmentVariableTarget.Machine);
+            if (string.IsNullOrWhiteSpace(toolsRoot))
+            {
+                throw new InvalidOperationException("MACHINE_TOOLS_ROOT is required for silent startup.");
+            }
+
+            var launcherPath = Path.Combine(toolsRoot, "SevLocal", "Bin", "runw", "runw.exe");
+            if (!File.Exists(launcherPath))
+            {
+                throw new FileNotFoundException("RunW is required for silent startup.", launcherPath);
+            }
+
+            key.SetValue(UiValueName, $"\"{launcherPath}\" /quiet \"{exePath}\" --startup");
         }
         else
         {
