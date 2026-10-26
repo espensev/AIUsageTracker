@@ -65,6 +65,21 @@ public class HttpFailureMapperTests
     }
 
     [Fact]
+    public void ClassifyResponse_MalformedRetryAfterRawHeader_YieldsNullRetryAfter()
+    {
+        // A provider may send a Retry-After value that is neither a delta-seconds
+        // integer nor an HTTP-date. Classification must not throw and must not
+        // surface a fabricated delay.
+        using var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        response.Headers.TryAddWithoutValidation("Retry-After", "not-a-number");
+
+        var ctx = HttpFailureMapper.ClassifyResponse(response);
+
+        Assert.Equal(HttpFailureClassification.RateLimit, ctx.Classification);
+        Assert.Null(ctx.RetryAfter);
+    }
+
+    [Fact]
     public void ClassifyResponse_RetryAfterNullWhenNotPresent()
     {
         using var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
