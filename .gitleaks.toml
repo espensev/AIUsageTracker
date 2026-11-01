@@ -2,8 +2,12 @@
 useDefault = true
 
 [allowlist]
-description = "Ignore generated scan artifacts accidentally committed in PR work"
+description = "Ignore generated scan artifacts accidentally committed in PR work, plus the baseline itself"
 paths = [
+    # The baseline stores every accepted finding's Match text, so scanning it
+    # produces one new finding per accepted entry. Gitleaks documents adding
+    # the baseline file to the allowlist for this reason.
+    '''^\.gitleaksbaseline\.json$''',
     '''^\.gitleaks-bin/''',
     '''^gitleaks-report\.json$''',
     '''^gitleaks_.*\.zip$''',
