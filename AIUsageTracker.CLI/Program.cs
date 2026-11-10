@@ -330,7 +330,7 @@ public static class Program
         }
     }
 
-    private static async Task SetKeyAsync(IMonitorService service, string providerId, string apiKey)
+    internal static async Task SetKeyAsync(IMonitorService service, string providerId, string apiKey)
     {
         Console.WriteLine($"Setting key for '{providerId}'...");
 

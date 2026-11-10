@@ -2,7 +2,6 @@
 // Copyright (c) AIUsageTracker. All rights reserved.
 // </copyright>
 
-using System.Text.Json;
 using AIUsageTracker.Core.Interfaces;
 using AIUsageTracker.Core.Models;
 using AIUsageTracker.Tests.Infrastructure;
@@ -68,6 +67,23 @@ public sealed class UpdateChannelPersistenceRegressionTests : IDisposable
         Assert.Empty(preferences.SuppressedProviderIds);
         Assert.Equal(23, preferences.FontSize);
         Assert.True(preferences.StayOpen);
+    }
+
+    /// <summary>
+    /// The shared preferences.json may contain "SuppressedProviderIds": null
+    /// (hand-edited files, older writers). The Slim load path must normalize it
+    /// to an empty list so suppression filtering never sees a null collection.
+    /// </summary>
+    [Fact]
+    public async Task LoadAsync_NullSuppressedProviderIdsOnDisk_YieldsEmptyListAsync()
+    {
+        await File.WriteAllTextAsync(this._preferencesPath, "{\"SuppressedProviderIds\":null,\"FontSize\":23}");
+
+        var loaded = await this._store.LoadAsync();
+
+        Assert.NotNull(loaded.SuppressedProviderIds);
+        Assert.Empty(loaded.SuppressedProviderIds);
+        Assert.Equal(23, loaded.FontSize);
     }
 
     public void Dispose()

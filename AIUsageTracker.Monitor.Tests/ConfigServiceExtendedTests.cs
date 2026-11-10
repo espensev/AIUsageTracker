@@ -226,6 +226,28 @@ public sealed class ConfigServiceExtendedTests : IDisposable
         Assert.Contains("replacement-key", await File.ReadAllTextAsync(Path.Combine(this._tempDir, "auth.json")), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task GetConfigsAsync_NullSuppressedPreferenceOnDisk_KeepsProvidersVisibleAsync()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "auth.json"),
+            "{\"groq\":{\"key\":\"retained-key\"}}");
+        await this.WriteProvidersJsonAsync("{}");
+        await File.WriteAllTextAsync(
+            Path.Combine(this._tempDir, "prefs.json"),
+            "{\"SuppressedProviderIds\":null,\"FontFamily\":\"Consolas\"}");
+
+        var configs = await this._service.GetConfigsAsync();
+        Assert.Contains(configs, config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+
+        // A successful save must keep the provider visible even when the on-disk
+        // suppression list is null: the preference normalizes at deserialization
+        // instead of crashing the consumer or hiding configured providers.
+        await this._service.SaveConfigAsync(new ProviderConfig { ProviderId = "groq", ApiKey = "replacement-key" });
+        Assert.Contains(await this._service.GetConfigsAsync(), config => string.Equals(config.ProviderId, "groq", StringComparison.Ordinal));
+        Assert.Contains("replacement-key", await File.ReadAllTextAsync(Path.Combine(this._tempDir, "auth.json")), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("kimi", "kimi-for-coding")]
     [InlineData("kimi-for-coding", "KIMI")]

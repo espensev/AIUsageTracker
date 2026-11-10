@@ -228,6 +228,30 @@ VALUES ('codex.spark', 10, 100, 10, 1, 'ok', 100, '2026-03-10 10:00:00');";
         Assert.AreEqual(3, (await service.GetLatestUsageAsync(includeInactive: true)).Count);
     }
 
+    [TestMethod]
+    public async Task OnGetAsync_NullSuppressedPreferenceOnDisk_ShowsAllCardsAsync()
+    {
+        var databasePath = this.CreateSeededDatabase();
+        var preferencesPath = Path.Combine(Path.GetDirectoryName(databasePath)!, "preferences.json");
+        await File.WriteAllTextAsync(preferencesPath, "{\"SuppressedProviderIds\":null,\"FontFamily\":\"Consolas\"}");
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = this.CreateService(databasePath, cache);
+        var preferences = new PreferencesStore(NullLogger<PreferencesStore>.Instance, new TestAppPathProvider(databasePath));
+        var model = new IndexModel(service, new UsageAnalyticsService(service, cache, NullLogger<UsageAnalyticsService>.Instance), preferences)
+        {
+            PageContext = new PageContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        await model.OnGetAsync(showUsed: null);
+
+        Assert.IsNotNull(model.LatestUsage);
+        Assert.AreEqual(2, model.LatestUsage.Count);
+        Assert.IsNotNull(model.Summary);
+        Assert.AreEqual(2, model.Summary.ProviderCount);
+        Assert.AreEqual(2, (await service.GetLatestUsageAsync(includeInactive: true)).Count);
+    }
+
     private WebDatabaseService CreateService(string databasePath, IMemoryCache cache)
     {
         return new WebDatabaseService(
