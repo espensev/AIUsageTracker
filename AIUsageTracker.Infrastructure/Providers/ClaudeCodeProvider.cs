@@ -425,15 +425,12 @@ public class ClaudeCodeProvider : ProviderBase
 
         if (results.Count == 0)
         {
-            results.Add(new StatusProviderUsage
-            {
-                ProviderId = this.ProviderId,
-                ProviderName = providerLabel,
-                IsAvailable = true,
-                RawJson = rawJson,
-                HttpStatus = httpStatus,
-                Description = "Usage data unavailable",
-            });
+            // The endpoint accepted the credentials (2xx) but returned no quota buckets. Report
+            // valid credentials without available usage instead of a live-usage state.
+            var unavailable = this.CreateUsageUnavailable(0, providerLabel);
+            unavailable.RawJson = rawJson;
+            unavailable.HttpStatus = httpStatus;
+            results.Add(unavailable);
         }
 
         return results;

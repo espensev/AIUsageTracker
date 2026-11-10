@@ -19,6 +19,90 @@ public class AuthPathTemplateResolverTests
         Assert.Equal(Path.Combine(root, "state", "auth.json"), resolved);
     }
 
+    /// <summary>
+    /// Windows/POSIX matrix: every token family combined with every separator style must resolve
+    /// to the same native path, with no foreign separator surviving anywhere in the result. The
+    /// assertions are platform-agnostic so the matrix passes on Windows and POSIX alike.
+    /// </summary>
+    [Theory]
+    [InlineData(@"%USERPROFILE%\.claude\.credentials.json")]
+    [InlineData(@"%USERPROFILE%/.claude/.credentials.json")]
+    [InlineData(@"%USERPROFILE%\.claude/.credentials.json")]
+    public void Resolve_ProfileTokenMatrix_AnySeparatorStyleYieldsTheNativePath(string template)
+    {
+        var root = this.NewMatrixRoot();
+
+        var resolved = AuthPathTemplateResolver.Resolve(template, root, _ => null);
+
+        Assert.Equal(Path.Combine(root, ".claude", ".credentials.json"), resolved);
+        this.AssertOnlyNativeSeparators(resolved);
+    }
+
+    [Theory]
+    [InlineData(@"%APPDATA%\provider\auth.json")]
+    [InlineData(@"%APPDATA%/provider/auth.json")]
+    [InlineData(@"%APPDATA%\provider/auth.json")]
+    public void Resolve_AppDataTokenMatrix_AnySeparatorStyleYieldsTheNativePath(string template)
+    {
+        var root = this.NewMatrixRoot();
+
+        var resolved = AuthPathTemplateResolver.Resolve(template, root, _ => null);
+
+        Assert.Equal(Path.Combine(root, "AppData", "Roaming", "provider", "auth.json"), resolved);
+        this.AssertOnlyNativeSeparators(resolved);
+    }
+
+    [Theory]
+    [InlineData(@"%LOCALAPPDATA%\provider\auth.json")]
+    [InlineData(@"%LOCALAPPDATA%/provider/auth.json")]
+    [InlineData(@"%LOCALAPPDATA%\provider/auth.json")]
+    public void Resolve_LocalAppDataTokenMatrix_AnySeparatorStyleYieldsTheNativePath(string template)
+    {
+        var root = this.NewMatrixRoot();
+
+        var resolved = AuthPathTemplateResolver.Resolve(template, root, _ => null);
+
+        Assert.Equal(Path.Combine(root, "AppData", "Local", "provider", "auth.json"), resolved);
+        this.AssertOnlyNativeSeparators(resolved);
+    }
+
+    [Theory]
+    [InlineData(@"%CLAUDE_CONFIG_DIR%\.credentials.json")]
+    [InlineData(@"%CLAUDE_CONFIG_DIR%/.credentials.json")]
+    public void Resolve_EnvironmentOverrideTokenMatrix_AnySeparatorStyleYieldsTheNativePath(string template)
+    {
+        var root = this.NewMatrixRoot();
+        var overrideHome = Path.Combine(root, "cli-home");
+
+        var resolved = AuthPathTemplateResolver.Resolve(template, root, name => overrideHome);
+
+        Assert.Equal(Path.Combine(overrideHome, ".credentials.json"), resolved);
+        this.AssertOnlyNativeSeparators(resolved);
+    }
+
+    [Fact]
+    public void Resolve_EnvironmentOverrideTokenMatrix_MixedSubPathYieldsTheNativePath()
+    {
+        var root = this.NewMatrixRoot();
+        var overrideHome = Path.Combine(root, "cli-home");
+
+        var resolved = AuthPathTemplateResolver.Resolve(@"%CLAUDE_CONFIG_DIR%\state/.credentials.json", root, name => overrideHome);
+
+        Assert.Equal(Path.Combine(overrideHome, "state", ".credentials.json"), resolved);
+        this.AssertOnlyNativeSeparators(resolved);
+    }
+
+    private string NewMatrixRoot()
+    {
+        return Path.Combine(Path.GetTempPath(), "auth-path-matrix", Guid.NewGuid().ToString("N"));
+    }
+
+    private void AssertOnlyNativeSeparators(string resolved)
+    {
+        var foreignSeparator = Path.DirectorySeparatorChar == '\\' ? '/' : '\\';
+        Assert.DoesNotContain(foreignSeparator, resolved);
+    }
+
     [Theory]
     [InlineData(@"%USERPROFILE%\.grok\auth.json", @"C:\Users\tester\.grok\auth.json")]
     [InlineData(@"%APPDATA%\codex\auth.json", @"C:\Users\tester\AppData\Roaming\codex\auth.json")]

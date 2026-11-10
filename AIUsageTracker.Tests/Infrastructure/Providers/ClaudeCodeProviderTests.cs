@@ -5,6 +5,7 @@
 using System.Net;
 using System.Text.Json;
 using AIUsageTracker.Core.Models;
+using AIUsageTracker.Core.Paths;
 using AIUsageTracker.Infrastructure.Providers;
 using Moq;
 using Moq.Protected;
@@ -41,6 +42,84 @@ public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>,
         File.WriteAllText(fallbackPath, JsonSerializer.Serialize(new { claudeAiOauth = new { accessToken = nativeToken } }));
 
         Assert.Equal(nativeToken, this._provider.ReadFreshOAuthToken(new[] { this._credentialsPath, fallbackPath }));
+    }
+
+    /// <summary>
+    /// Synthetic credential matrix: every candidate is one of missing, malformed JSON, a wrong
+    /// root shape, a non-string token, a whitespace token or a usable session, in the listed
+    /// order. The first usable candidate must win and later unusable ones must never poison it.
+    /// <paramref name="expectedIndex"/> is the zero-based position of the winning candidate, or
+    /// -1 when no candidate is usable.
+    /// </summary>
+    [Theory]
+    [InlineData("valid|valid", 0)]
+    [InlineData("missing|valid|missing|valid", 1)]
+    [InlineData("invalid|missing|valid", 2)]
+    [InlineData("wrong-root|invalid|empty-token|valid", 3)]
+    [InlineData("non-string|wrong-root|missing|valid", 3)]
+    [InlineData("valid|invalid", 0)]
+    [InlineData("invalid|wrong-root|empty-token|non-string|missing", -1)]
+    public void ReadFreshOAuthToken_CandidateMatrix_ReturnsTheFirstUsableSession(string scenario, int expectedIndex)
+    {
+        ArgumentNullException.ThrowIfNull(scenario);
+
+        var candidates = new List<string>();
+        var candidateTokens = new List<string?>();
+        foreach (var (kind, index) in scenario.Split('|').Select((kind, index) => (kind, index)))
+        {
+            var path = Path.Combine(this._testDirectory, $"matrix-candidate-{index}.json");
+            var token = $"sk-ant-oat-{Guid.NewGuid():N}";
+            if (!string.Equals(kind, "missing", StringComparison.Ordinal))
+            {
+                File.WriteAllText(path, kind switch
+                {
+                    "valid" => JsonSerializer.Serialize(new { claudeAiOauth = new { accessToken = token } }),
+                    "invalid" => "invalid-json",
+                    "wrong-root" => """{"notClaudeAiOauth":{"accessToken":"unused"}}""",
+                    "non-string" => """{"claudeAiOauth":{"accessToken":123}}""",
+                    "empty-token" => """{"claudeAiOauth":{"accessToken":"   "}}""",
+                    _ => throw new ArgumentOutOfRangeException(nameof(scenario), kind, "Unknown candidate kind"),
+                });
+            }
+
+            candidates.Add(path);
+            candidateTokens.Add(string.Equals(kind, "valid", StringComparison.Ordinal) ? token : null);
+        }
+
+        var resolved = this._provider.ReadFreshOAuthToken(candidates);
+
+        if (expectedIndex < 0)
+        {
+            Assert.Null(resolved);
+        }
+        else
+        {
+            Assert.Equal(candidateTokens[expectedIndex], resolved);
+        }
+    }
+
+    /// <summary>
+    /// Intersection of the credential and path matrices: candidate paths derived from
+    /// mixed-separator templates must land on the synthetic credentials files regardless of the
+    /// platform's native separator.
+    /// </summary>
+    [Fact]
+    public void ReadFreshOAuthToken_MixedSeparatorCandidatePaths_ResolvesSyntheticSessions()
+    {
+        var nativeToken = $"sk-ant-oat-{Guid.NewGuid():N}";
+        var overrideHome = Path.Combine(this._testDirectory, "cli-home");
+        Directory.CreateDirectory(overrideHome);
+        File.WriteAllText(
+            Path.Combine(overrideHome, ".credentials.json"),
+            JsonSerializer.Serialize(new { claudeAiOauth = new { accessToken = nativeToken } }));
+
+        var candidates = new[]
+        {
+            AuthPathTemplateResolver.Resolve(@"%CLAUDE_CONFIG_DIR%\.credentials.json", this._testDirectory, name => overrideHome),
+            AuthPathTemplateResolver.Resolve(@"%CLAUDE_CONFIG_DIR%/.credentials.json", this._testDirectory, name => overrideHome),
+        };
+
+        Assert.Equal(nativeToken, this._provider.ReadFreshOAuthToken(candidates));
     }
 
     [Theory]
@@ -99,6 +178,48 @@ public class ClaudeCodeProviderTests : HttpProviderTestBase<ClaudeCodeProvider>,
         Assert.Equal(ProviderUsageState.Unavailable, usage.State);
         Assert.Equal(200, usage.HttpStatus);
         Assert.DoesNotContain("Authentication failed", usage.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetUsageFromOAuthAsync_AcceptedTokenWithoutQuotaData_ReportsUnavailableStateAsync()
+    {
+        // Valid credentials: the usage endpoint accepted the token (200) but returned no buckets.
+        // The card must not claim State.Available ("has live usage data") for an empty response.
+        this.SetupOAuthResponse(HttpStatusCode.OK, "{}");
+
+        var results = await this._provider.GetUsageFromOAuthAsync("test-token", "Claude Code");
+        Assert.NotNull(results);
+        var usage = Assert.IsType<StatusProviderUsage>(results!.Single());
+
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(ProviderUsageState.Unavailable, usage.State);
+        Assert.Equal(200, usage.HttpStatus);
+        Assert.Contains("Usage data unavailable", usage.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_ValidNativeSessionWithoutQuotaData_ReportsUnavailableWithoutProbingConfiguredKeyAsync()
+    {
+        var nativeToken = $"sk-ant-oat-{Guid.NewGuid():N}";
+        await File.WriteAllTextAsync(
+            this._credentialsPath,
+            JsonSerializer.Serialize(new { claudeAiOauth = new { accessToken = nativeToken } }));
+        this.SetupOAuthResponse(HttpStatusCode.OK, "{}");
+        this.SetupMessagesResponse(HttpStatusCode.OK, "{}");
+
+        var usage = (await this._provider.GetUsageAsync(this.Config)).Single();
+
+        // The session is valid, so the configured key must stay unprobed; the card reports
+        // valid credentials without available usage instead of a live-usage state.
+        Assert.False(usage.IsAvailable);
+        Assert.Equal(ProviderUsageState.Unavailable, usage.State);
+        Assert.Equal(200, usage.HttpStatus);
+        Assert.Equal("Claude Code CLI session auth", usage.AuthSource);
+        this.MessageHandler.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.Is<HttpRequestMessage>(request => request.Method == HttpMethod.Post),
+            ItExpr.IsAny<CancellationToken>());
     }
 
     /// <summary>
