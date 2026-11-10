@@ -353,7 +353,15 @@ public class Program
             return 1;
         }
 
-        var historyToInsert = fixture.LatestHistory.Count > 0 ? fixture.LatestHistory : fixture.History7Days;
+        // The fixture stores the same database row in both views: the latest snapshot per
+        // provider and card, and everything inside the 7-day window. Seed their union so a
+        // reseed reproduces every exported row; duplicates collapse on the database identity
+        // (provider, card, fetched second) instead of one whole list being dropped.
+        var historyToInsert = fixture.LatestHistory
+            .Concat(fixture.History7Days)
+            .GroupBy(history => (history.ProviderId, CardKey: history.CardId ?? string.Empty, ToFetchedAtEpochSeconds(history.FetchedAt)))
+            .Select(group => group.First())
+            .ToList();
         var providerIds = fixture.Providers.Select(provider => provider.ProviderId)
             .Concat(historyToInsert.Select(history => history.ProviderId))
             .ToHashSet(StringComparer.Ordinal);

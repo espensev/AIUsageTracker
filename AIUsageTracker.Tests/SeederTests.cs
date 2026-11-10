@@ -159,6 +159,69 @@ VALUES (@Provider, 12.5, 100, 12.5, 1, 'retained history', '2026-11-01T00:00:00Z
         }
     }
 
+    [Fact]
+    public void ExportData_MultiCardRecentAndOldHistory_ReseedsWithoutOmissionOrMerging()
+    {
+        var directory = TestTempPaths.CreateDirectory("seeder-union-roundtrip");
+        try
+        {
+            var original = Path.Combine(directory, "original.db");
+            var restored = Path.Combine(directory, "restored.db");
+            var exported = Path.Combine(directory, "export.json");
+            var bootstrap = Path.Combine(directory, "bootstrap.json");
+            File.WriteAllText(bootstrap, JsonSerializer.Serialize(new
+            {
+                providers = new[] { new { provider_id = "provider-a", provider_name = "Provider A", is_active = 1 } },
+                latest_history = Array.Empty<object>(),
+                history_7days = Array.Empty<object>(),
+            }));
+            Assert.Equal(0, Seeder.Program.SeedDatabase(bootstrap, original));
+
+            using var connection = Open(original);
+            connection.Execute("DELETE FROM provider_history");
+            var now = DateTimeOffset.UtcNow;
+            const string insert = @"
+INSERT INTO provider_history (provider_id, requests_used, requests_available, requests_percentage,
+    is_available, status_message, next_reset_time, fetched_at, details_json, response_latency_ms,
+    http_status, upstream_response_validity, upstream_response_note, parent_provider_id, card_id,
+    group_id, window_kind, model_name, name, card_type, reset_credits_available, reset_credit_expirations_utc)
+VALUES (@Provider, 7.5, 90, 8.3, 1, 'union roundtrip', '2026-11-01T00:00:00Z', @Fetched,
+    '[]', 33.5, 200, 1, 'valid union fixture', @Provider, @Card, @Provider, 1, 'union-model', @Card,
+    'windowed', 2, '[""2026-11-01T00:00:00Z""]');";
+            connection.Execute(insert, new { Provider = "provider-a", Card = "card-alpha", Fetched = now.AddDays(-1).ToUnixTimeSeconds() });
+            connection.Execute(insert, new { Provider = "provider-a", Card = "card-alpha", Fetched = now.AddDays(-2).ToUnixTimeSeconds() });
+            connection.Execute(insert, new { Provider = "provider-a", Card = "card-alpha", Fetched = now.AddDays(-41).ToUnixTimeSeconds() });
+            connection.Execute(insert, new { Provider = "provider-a", Card = "card-beta", Fetched = now.AddDays(-40).ToUnixTimeSeconds() });
+
+            Assert.Equal(0, Seeder.Program.ExportData(exported, original));
+            using var json = JsonDocument.Parse(File.ReadAllText(exported));
+            Assert.Equal(2, json.RootElement.GetProperty("history_7days").GetArrayLength());
+            Assert.Equal(2, json.RootElement.GetProperty("latest_history").GetArrayLength());
+
+            Assert.Equal(0, Seeder.Program.SeedDatabase(exported, restored));
+            using var restoredConnection = Open(restored);
+            Assert.Equal(3, restoredConnection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history"));
+            Assert.Equal(
+                2,
+                restoredConnection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history WHERE card_id = 'card-alpha'"));
+            Assert.Equal(
+                1,
+                restoredConnection.ExecuteScalar<int>("SELECT COUNT(*) FROM provider_history WHERE card_id = 'card-beta'"));
+            Assert.Equal(
+                new[] { now.AddDays(-2).ToUnixTimeSeconds(), now.AddDays(-1).ToUnixTimeSeconds() },
+                restoredConnection.Query<long>(
+                    "SELECT fetched_at FROM provider_history WHERE card_id = 'card-alpha' ORDER BY fetched_at"));
+            Assert.Equal(
+                now.AddDays(-40).ToUnixTimeSeconds(),
+                restoredConnection.ExecuteScalar<long>("SELECT fetched_at FROM provider_history WHERE card_id = 'card-beta'"));
+            Assert.Equal(0, restoredConnection.ExecuteScalar<int>("SELECT COUNT(*) FROM pragma_foreign_key_check"));
+        }
+        finally
+        {
+            TestTempPaths.CleanupPath(directory);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -169,7 +232,9 @@ VALUES (@Provider, 12.5, 100, 12.5, 1, 'retained history', '2026-11-01T00:00:00Z
 
         using var fixture = JsonDocument.Parse(File.ReadAllText(fixturePath));
         var providers = fixture.RootElement.GetProperty("providers").EnumerateArray().ToArray();
-        var history = fixture.RootElement.GetProperty(useSevenDayHistory ? "history_7days" : "latest_history").EnumerateArray().ToArray();
+        var latestRows = fixture.RootElement.GetProperty("latest_history").EnumerateArray().ToArray();
+        var sevenDayRows = fixture.RootElement.GetProperty("history_7days").EnumerateArray().ToArray();
+        var history = useSevenDayHistory ? sevenDayRows : UnionHistoryRows(latestRows, sevenDayRows).ToArray();
         var providerIds = providers.Select(provider => provider.GetProperty("provider_id").GetString()).ToHashSet(StringComparer.Ordinal);
         var missingIds = history.Select(row => row.GetProperty("provider_id").GetString())
             .Where(id => id is not null && !providerIds.Contains(id))
@@ -219,6 +284,32 @@ VALUES (@Provider, 12.5, 100, 12.5, 1, 'retained history', '2026-11-01T00:00:00Z
         {
             TestTempPaths.CleanupPath(directory);
         }
+    }
+
+    private static IEnumerable<JsonElement> UnionHistoryRows(JsonElement[] latestRows, JsonElement[] sevenDayRows)
+    {
+        return latestRows
+            .Concat(sevenDayRows)
+            .GroupBy(row => (
+                row.GetProperty("provider_id").GetString() ?? string.Empty,
+                row.TryGetProperty("card_id", out var cardId) ? cardId.GetString() ?? string.Empty : string.Empty,
+                FetchedAtEpoch(row)))
+            .Select(group => group.First());
+    }
+
+    private static long FetchedAtEpoch(JsonElement row)
+    {
+        var fetchedAt = row.GetProperty("fetched_at").GetString()!;
+        if (long.TryParse(fetchedAt, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var epoch))
+        {
+            return epoch;
+        }
+
+        return DateTimeOffset.Parse(
+            fetchedAt,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)
+            .ToUnixTimeSeconds();
     }
 
     private static SqliteConnection Open(string database)
